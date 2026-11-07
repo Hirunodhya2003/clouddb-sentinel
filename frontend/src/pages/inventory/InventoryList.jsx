@@ -1,0 +1,5 @@
+// Owner: Member 05
+// TODO: implement
+export default function InventoryList() {
+  return null;
+}

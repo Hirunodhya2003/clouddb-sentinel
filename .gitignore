@@ -1,0 +1,22 @@
+# Owner: Member 01
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.coverage
+# Node
+node_modules/
+dist/
+# Env / secrets
+.env
+*.env.local
+# Backups / generated
+*.sql.gz
+*.bak
+backups/
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
