@@ -1,2 +1,10 @@
--- Owner: Member 06
--- TODO: write SQL
+-- CloudDB Sentinel
+-- Seed: Initial user provisioning
+--
+-- Initial ADMIN account must be created through
+-- the backend bootstrap process.
+--
+-- Never store plain-text passwords in SQL seed files.
+-- Passwords must be securely hashed using Argon2 or bcrypt.
+--
+-- User accounts will be created through the application.

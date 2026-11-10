@@ -1,2 +1,8 @@
--- Owner: Member 06
--- TODO: write SQL
+-- CloudDB Sentinel
+-- Seed: Customer data
+--
+-- No customer records are inserted here.
+-- Actual customer information must be obtained
+-- from S.P. Apparel before inserting records.
+--
+-- Customer personal information must be handled securely.

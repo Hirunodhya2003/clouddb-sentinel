@@ -1,2 +1,6 @@
--- Owner: Member 06
--- TODO: write SQL
+-- CloudDB Sentinel
+-- Seed: Category data
+--
+-- No category records are inserted here.
+-- Actual product categories must be confirmed
+-- with S.P. Apparel before inserting records.
