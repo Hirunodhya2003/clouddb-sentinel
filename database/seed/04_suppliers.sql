@@ -1,2 +1,6 @@
--- Owner: Member 06
--- TODO: write SQL
+-- CloudDB Sentinel
+-- Seed: Supplier data
+--
+-- No supplier records are inserted here.
+-- Actual supplier information must be obtained
+-- from S.P. Apparel before inserting records.
