@@ -12,6 +12,599 @@ function generateSuggestedReference() {
   return `ADJ-2026-${randomSuffix}`;
 }
 
+export function formatCurrencyINR(amount) {
+  const num = Number(amount);
+  if (Number.isNaN(num)) return 'INR 0';
+  return `INR ${num.toLocaleString('en-IN', {
+    minimumFractionDigits: num % 1 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+/**
+ * Create Sales Return Form Component (Figma UI 21)
+ * Conforms strictly to:
+ *   - sales_returns (05_create_sales_returns_table.sql)
+ *   - sales_return_items (06_create_sales_return_items_table.sql)
+ *
+ * IMPORTANT:
+ *   - Calculates refund_subtotal = quantity * refund_unit_price for display ONLY.
+ *   - Never stores or submits refund_subtotal in the payload because it is a
+ *     MySQL GENERATED ALWAYS AS (quantity * refund_unit_price) STORED column.
+ *   - Validates that the selected sale_item_id belongs to the selected sale_id
+ *     and that quantity > 0 and quantity <= remaining_eligible_quantity.
+ *   - Submits new returns in PENDING status only (development mock mode).
+ */
+function SalesReturnCreationForm({
+  sales = [],
+  onSubmitReturn,
+  onCancel,
+}) {
+  const [selectedSaleId, setSelectedSaleId] = useState('');
+  const [selectedSaleItemId, setSelectedSaleItemId] = useState('');
+  const [returnDate, setReturnDate] = useState('2026-11-17');
+  const [returnQuantity, setReturnQuantity] = useState('1');
+  const [returnReason, setReturnReason] = useState('');
+  const [notes, setNotes] = useState('');
+
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [submitError, setSubmitError] = useState(null);
+  const [submitSuccess, setSubmitSuccess] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const selectedSale = useMemo(() => {
+    if (!selectedSaleId) return null;
+    return sales.find((s) => s.sale_id === Number(selectedSaleId)) || null;
+  }, [sales, selectedSaleId]);
+
+  const availableSaleItems = useMemo(() => {
+    return selectedSale?.items || [];
+  }, [selectedSale]);
+
+  const selectedSaleItem = useMemo(() => {
+    if (!selectedSaleItemId || !selectedSale) return null;
+    return (
+      availableSaleItems.find(
+        (item) => item.sale_item_id === Number(selectedSaleItemId)
+      ) || null
+    );
+  }, [availableSaleItems, selectedSale, selectedSaleItemId]);
+
+  // Display-only preview of refund_subtotal = quantity * refund_unit_price
+  const refundSubtotalPreview = useMemo(() => {
+    if (!selectedSaleItem) return null;
+    const qty = Number(returnQuantity);
+    if (returnQuantity === '' || !Number.isInteger(qty) || qty <= 0) {
+      return 0;
+    }
+    return Number((qty * Number(selectedSaleItem.unit_price)).toFixed(2));
+  }, [selectedSaleItem, returnQuantity]);
+
+  const handleSaleChange = (event) => {
+    const nextSaleId = event.target.value;
+    setSelectedSaleId(nextSaleId);
+    setSelectedSaleItemId('');
+    setReturnQuantity('1');
+    setSubmitError(null);
+    setFieldErrors((prev) => ({
+      ...prev,
+      sale_id: null,
+      sale_item_id: null,
+      quantity: null,
+    }));
+  };
+
+  const handleSaleItemChange = (event) => {
+    const nextItemId = event.target.value;
+    setSelectedSaleItemId(nextItemId);
+    setSubmitError(null);
+
+    if (nextItemId && selectedSale) {
+      const matchedItem = (selectedSale.items || []).find(
+        (i) => i.sale_item_id === Number(nextItemId)
+      );
+      if (matchedItem) {
+        setReturnQuantity(
+          matchedItem.remaining_eligible_quantity > 0 ? '1' : '0'
+        );
+      }
+    }
+
+    setFieldErrors((prev) => ({
+      ...prev,
+      sale_item_id: null,
+      quantity: null,
+    }));
+  };
+
+  const validateReturnForm = () => {
+    const errors = {};
+    const trimmedReason = returnReason.trim();
+
+    if (!selectedSaleId || !selectedSale) {
+      errors.sale_id = 'Please select an original completed sale.';
+    }
+
+    if (!selectedSaleItemId) {
+      errors.sale_item_id =
+        'Please select a sale item belonging to the selected sale.';
+    } else if (!selectedSaleItem) {
+      errors.sale_item_id =
+        'Selected sale item does not belong to the chosen sale.';
+    }
+
+    if (!returnDate) {
+      errors.return_date = 'Return date is required.';
+    }
+
+    const parsedQty = Number(returnQuantity);
+    if (
+      returnQuantity === '' ||
+      !Number.isInteger(parsedQty) ||
+      parsedQty <= 0
+    ) {
+      errors.quantity =
+        'Return quantity must be a whole integer greater than 0 (chk_return_item_quantity).';
+    } else if (
+      selectedSaleItem &&
+      parsedQty > selectedSaleItem.remaining_eligible_quantity
+    ) {
+      errors.quantity = `Cannot return ${parsedQty} units. Only ${selectedSaleItem.remaining_eligible_quantity} units remain eligible (Sold: ${selectedSaleItem.quantity}, Previously returned: ${selectedSaleItem.previously_returned_quantity}).`;
+    }
+
+    if (!trimmedReason) {
+      errors.return_reason =
+        'Return reason is required (chk_return_reason_not_empty).';
+    } else if (trimmedReason.length > 255) {
+      errors.return_reason =
+        'Return reason cannot exceed 255 characters (VARCHAR(255)).';
+    }
+
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleReset = () => {
+    setSelectedSaleId('');
+    setSelectedSaleItemId('');
+    setReturnDate('2026-11-17');
+    setReturnQuantity('1');
+    setReturnReason('');
+    setNotes('');
+    setFieldErrors({});
+    setSubmitError(null);
+    setSubmitSuccess(null);
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setSubmitError(null);
+    setSubmitSuccess(null);
+
+    if (!validateReturnForm()) {
+      setSubmitError(
+        'Please correct the highlighted validation errors before saving.'
+      );
+      return;
+    }
+
+    // Build schema-compliant payload WITHOUT refund_subtotal
+    // (refund_subtotal is GENERATED ALWAYS AS (quantity * refund_unit_price) STORED in MySQL)
+    const payload = {
+      sale_id: Number(selectedSaleId),
+      return_date: `${returnDate}T12:00:00Z`,
+      return_reason: returnReason.trim(),
+      notes: notes.trim() || null,
+      items: [
+        {
+          sale_item_id: Number(selectedSaleItemId),
+          quantity: Number(returnQuantity),
+          refund_unit_price: Number(selectedSaleItem.unit_price),
+        },
+      ],
+    };
+
+    setIsSubmitting(true);
+    try {
+      const response = await onSubmitReturn(payload);
+      setSubmitSuccess({
+        returnCode: response?.item?.return_code || `RET-${response?.item?.return_id}`,
+        saleCode: response?.item?.sale_code || `SAL-${payload.sale_id}`,
+        invoiceNumber: response?.item?.invoice_number,
+        status: response?.item?.return_status || 'PENDING',
+        totalRefund: response?.item?.total_refund_amount || 0,
+        notice:
+          response?.notice ||
+          'Development mock submission only: Added as PENDING in local memory. No database save, inventory restoration (sp_update_inventory), stock_movements record, or financial refund was processed.',
+      });
+      setSelectedSaleItemId('');
+      setReturnQuantity('1');
+      setReturnReason('');
+      setNotes('');
+      setFieldErrors({});
+    } catch (err) {
+      setSubmitError(
+        err instanceof Error
+          ? err.message
+          : 'Unable to submit sales return.'
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="m08-sa-form-view">
+      {/* Top Header matching Figma UI 21 */}
+      <header className="m08-sa-header">
+        <div className="m08-sa-title-group">
+          <div className="m08-sa-title-row">
+            <h1 id="m08-sr-form-title" className="m08-sa-title">
+              Create Return
+            </h1>
+            {IS_DEVELOPMENT_MOCK_MODE && (
+              <span
+                className="m08-sa-mock-pill"
+                title={`Development mock submission (${API_ENDPOINTS.CREATE_RETURN})`}
+              >
+                Dev Mock Mode · Local Pending Only
+              </span>
+            )}
+          </div>
+          <p className="m08-sa-subtitle">
+            Register items returned against a sale
+          </p>
+        </div>
+
+        <div className="m08-sa-header-actions">
+          {onCancel && (
+            <button
+              type="button"
+              className="m08-sa-btn-secondary"
+              onClick={onCancel}
+            >
+              ← Back to directory
+            </button>
+          )}
+          <button
+            type="submit"
+            form="m08-create-return-form"
+            className="m08-sa-btn-primary"
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? 'Saving...' : 'Save changes'}
+          </button>
+        </div>
+      </header>
+
+      {/* Main White Card matching Figma UI 21 */}
+      <div className="m08-sa-card">
+        <div className="m08-sa-form-section-header">
+          <h2 className="m08-sa-card-title">Basic information</h2>
+          <p className="m08-sa-card-subtitle">
+            Complete the information below. Fields marked required must be provided.
+          </p>
+        </div>
+
+        {submitError && (
+          <div className="m08-sa-alert m08-sa-alert-error" role="alert">
+            <strong>Validation / Submission Error:</strong> {submitError}
+          </div>
+        )}
+
+        {submitSuccess && (
+          <div
+            className="m08-sa-alert m08-sa-alert-success"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="m08-sa-alert-title">
+              Mock Sales Return Created: {submitSuccess.returnCode} against{' '}
+              {submitSuccess.saleCode} ({submitSuccess.invoiceNumber}) · Status:{' '}
+              {submitSuccess.status} · Refund:{' '}
+              {formatCurrencyINR(submitSuccess.totalRefund)}
+            </div>
+            <p className="m08-sa-alert-text">{submitSuccess.notice}</p>
+            {onCancel && (
+              <div style={{ marginTop: '10px' }}>
+                <button
+                  type="button"
+                  className="m08-sa-btn-secondary"
+                  onClick={onCancel}
+                >
+                  View in Sales Returns directory →
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        <form
+          id="m08-create-return-form"
+          onSubmit={handleSubmit}
+          noValidate
+          aria-labelledby="m08-sr-form-title"
+        >
+          {/* 2-Column Grid matching Figma UI 21 */}
+          <div className="m08-sa-form-grid">
+            {/* Slot 1 (Top Left): Reference / Name (Original Sale) */}
+            <div className="m08-sa-field">
+              <label htmlFor="m08-ret-sale" className="m08-sa-label">
+                Reference / Name (Original Sale) <span aria-hidden="true">*</span>
+              </label>
+              <select
+                id="m08-ret-sale"
+                className={`m08-sa-input ${
+                  fieldErrors.sale_id ? 'm08-sa-input-error' : ''
+                }`}
+                value={selectedSaleId}
+                onChange={handleSaleChange}
+                required
+              >
+                <option value="">Enter details / Select original sale</option>
+                {sales.map((sale) => (
+                  <option key={sale.sale_id} value={sale.sale_id}>
+                    SAL-{sale.sale_id} · {sale.invoice_number} —{' '}
+                    {sale.customer_name} ({sale.sale_label})
+                  </option>
+                ))}
+              </select>
+              {selectedSale && (
+                <span className="m08-sa-field-hint">
+                  Invoice: <strong>{selectedSale.invoice_number}</strong> ·
+                  Customer: {selectedSale.customer_name} · Sale Total:{' '}
+                  {formatCurrencyINR(selectedSale.total_amount)}
+                </span>
+              )}
+              {fieldErrors.sale_id && (
+                <span className="m08-sa-field-error" role="alert">
+                  {fieldErrors.sale_id}
+                </span>
+              )}
+            </div>
+
+            {/* Slot 2 (Top Right): Related record (Sale Line Item) */}
+            <div className="m08-sa-field">
+              <label htmlFor="m08-ret-sale-item" className="m08-sa-label">
+                Related record (Sale Line Item) <span aria-hidden="true">*</span>
+              </label>
+              <select
+                id="m08-ret-sale-item"
+                className={`m08-sa-input ${
+                  fieldErrors.sale_item_id ? 'm08-sa-input-error' : ''
+                }`}
+                value={selectedSaleItemId}
+                onChange={handleSaleItemChange}
+                disabled={!selectedSale}
+                required
+              >
+                <option value="">
+                  {selectedSale
+                    ? 'Select an option'
+                    : 'Select an original sale first'}
+                </option>
+                {availableSaleItems.map((item) => (
+                  <option key={item.sale_item_id} value={item.sale_item_id}>
+                    {item.sku} · {item.product_name} ({item.size_name} /{' '}
+                    {item.colour_name}) — Sold: {item.quantity}, Returned:{' '}
+                    {item.previously_returned_quantity}, Eligible:{' '}
+                    {item.remaining_eligible_quantity}
+                  </option>
+                ))}
+              </select>
+              {selectedSaleItem && (
+                <span className="m08-sa-field-hint">
+                  Sale Item #{selectedSaleItem.sale_item_id} · Variant #
+                  {selectedSaleItem.variant_id} · Sold:{' '}
+                  <strong>{selectedSaleItem.quantity} units</strong> · Previously
+                  Returned: <strong>{selectedSaleItem.previously_returned_quantity} units</strong> ·
+                  Remaining Eligible:{' '}
+                  <strong>
+                    {selectedSaleItem.remaining_eligible_quantity} units
+                  </strong>
+                </span>
+              )}
+              {fieldErrors.sale_item_id && (
+                <span className="m08-sa-field-error" role="alert">
+                  {fieldErrors.sale_item_id}
+                </span>
+              )}
+            </div>
+
+            {/* Slot 3 (Middle Left): Date */}
+            <div className="m08-sa-field">
+              <label htmlFor="m08-ret-date" className="m08-sa-label">
+                Date <span aria-hidden="true">*</span>
+              </label>
+              <input
+                id="m08-ret-date"
+                type="date"
+                className={`m08-sa-input ${
+                  fieldErrors.return_date ? 'm08-sa-input-error' : ''
+                }`}
+                value={returnDate}
+                onChange={(e) => setReturnDate(e.target.value)}
+                required
+              />
+              {fieldErrors.return_date && (
+                <span className="m08-sa-field-error" role="alert">
+                  {fieldErrors.return_date}
+                </span>
+              )}
+            </div>
+
+            {/* Slot 4 (Middle Right): Quantity / Amount */}
+            <div className="m08-sa-field">
+              <div className="m08-sa-subgrid-3">
+                <div>
+                  <label htmlFor="m08-ret-qty" className="m08-sa-label">
+                    Quantity <span aria-hidden="true">*</span>
+                  </label>
+                  <input
+                    id="m08-ret-qty"
+                    type="number"
+                    min="1"
+                    max={selectedSaleItem?.remaining_eligible_quantity ?? undefined}
+                    step="1"
+                    className={`m08-sa-input ${
+                      fieldErrors.quantity ? 'm08-sa-input-error' : ''
+                    }`}
+                    placeholder="0"
+                    value={returnQuantity}
+                    onChange={(e) => {
+                      setReturnQuantity(e.target.value);
+                      if (fieldErrors.quantity) {
+                        setFieldErrors((prev) => ({ ...prev, quantity: null }));
+                      }
+                    }}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <span className="m08-sa-label">Refund Unit Price</span>
+                  <div className="m08-sa-input m08-sa-input-readonly">
+                    {selectedSaleItem
+                      ? formatCurrencyINR(selectedSaleItem.unit_price)
+                      : 'INR 0'}
+                  </div>
+                </div>
+
+                <div>
+                  <span className="m08-sa-label">
+                    Refund Subtotal (Display)
+                  </span>
+                  <div
+                    className="m08-sa-input m08-sa-input-readonly"
+                    aria-live="polite"
+                    title="MySQL GENERATED ALWAYS AS (quantity * refund_unit_price) STORED. Calculated for display only; not submitted."
+                  >
+                    {refundSubtotalPreview === null
+                      ? 'INR 0'
+                      : formatCurrencyINR(refundSubtotalPreview)}
+                  </div>
+                </div>
+              </div>
+              {fieldErrors.quantity && (
+                <span className="m08-sa-field-error" role="alert">
+                  {fieldErrors.quantity}
+                </span>
+              )}
+              <span className="m08-sa-field-hint">
+                <code>refund_subtotal</code> is calculated as{' '}
+                <code>quantity * refund_unit_price</code> for display only and is
+                never manually stored or submitted.
+              </span>
+            </div>
+
+            {/* Slot 5 (Bottom Left): Description (return_reason & optional notes) */}
+            <div className="m08-sa-field">
+              <label htmlFor="m08-ret-reason" className="m08-sa-label">
+                Description (Return Reason) <span aria-hidden="true">*</span>
+              </label>
+              <input
+                id="m08-ret-reason"
+                type="text"
+                maxLength={255}
+                className={`m08-sa-input ${
+                  fieldErrors.return_reason ? 'm08-sa-input-error' : ''
+                }`}
+                placeholder="Enter details (required return reason, max 255 chars)"
+                value={returnReason}
+                onChange={(e) => {
+                  setReturnReason(e.target.value);
+                  if (fieldErrors.return_reason) {
+                    setFieldErrors((prev) => ({
+                      ...prev,
+                      return_reason: null,
+                    }));
+                  }
+                }}
+                required
+              />
+              {fieldErrors.return_reason && (
+                <span className="m08-sa-field-error" role="alert">
+                  {fieldErrors.return_reason}
+                </span>
+              )}
+
+              <div style={{ marginTop: '12px' }}>
+                <label htmlFor="m08-ret-notes" className="m08-sa-label">
+                  Inspection / Operational Notes (Optional)
+                </label>
+                <input
+                  id="m08-ret-notes"
+                  type="text"
+                  className="m08-sa-input"
+                  placeholder="Optional inspection notes (sales_returns.notes)"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* Slot 6 (Bottom Right): Status */}
+            <div className="m08-sa-field">
+              <label htmlFor="m08-ret-status" className="m08-sa-label">
+                Status
+              </label>
+              <input
+                id="m08-ret-status"
+                type="text"
+                className="m08-sa-input m08-sa-input-readonly"
+                value="PENDING (Awaiting Approval)"
+                readOnly
+                aria-readonly="true"
+              />
+              <span className="m08-sa-field-hint">
+                New returns always start as <code>PENDING</code>. Stock
+                restoration into inventory occurs only upon approved completion
+                via Member 05&apos;s <code>sp_update_inventory</code> stored
+                procedure.
+              </span>
+            </div>
+          </div>
+
+          {/* Card Footer matching Figma UI 21 */}
+          <div className="m08-sa-form-footer">
+            <p className="m08-sa-footer-note">
+              All changes are subject to validation and role permissions.
+            </p>
+
+            <div className="m08-sa-footer-actions">
+              <button
+                type="button"
+                className="m08-sa-btn-secondary"
+                onClick={handleReset}
+                disabled={isSubmitting}
+              >
+                Reset
+              </button>
+              {onCancel && (
+                <button
+                  type="button"
+                  className="m08-sa-btn-secondary"
+                  onClick={onCancel}
+                  disabled={isSubmitting}
+                >
+                  Cancel
+                </button>
+              )}
+              <button
+                type="submit"
+                className="m08-sa-btn-primary"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? 'Saving...' : 'Save changes'}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Create Stock Adjustment Form Component (Figma UI 19)
  * Conforms strictly to:
@@ -24,12 +617,18 @@ function generateSuggestedReference() {
  *     MySQL GENERATED ALWAYS AS (quantity_after - quantity_before) STORED column.
  *   - Submits new adjustments in PENDING status only (development mock mode).
  */
-export default function MovementForm({
-  variants = [],
-  existingReferences = [],
-  onSubmitAdjustment,
-  onCancel,
-}) {
+export default function MovementForm(props) {
+  const {
+    mode = 'adjustment',
+    variants = [],
+    existingReferences = [],
+    onSubmitAdjustment,
+    onCancel,
+  } = props;
+
+  if (mode === 'return') {
+    return <SalesReturnCreationForm {...props} />;
+  }
   const [adjustmentReference, setAdjustmentReference] = useState('ADJ-2026-2105');
   const [adjustmentDate, setAdjustmentDate] = useState('2026-11-17');
   const [adjustmentType, setAdjustmentType] = useState('PHYSICAL_COUNT');

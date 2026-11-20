@@ -19,6 +19,8 @@ export const API_ENDPOINTS = Object.freeze({
   CREATE_STOCK_ADJUSTMENT: '/api/v1/stock-adjustments',
   GET_STOCK_ADJUSTMENT_BY_ID: (adjustmentId) =>
     `/api/v1/stock-adjustments/${adjustmentId}`,
+  LIST_RETURNS: '/api/v1/returns',
+  CREATE_RETURN: '/api/v1/returns',
 });
 
 /**
@@ -1220,6 +1222,784 @@ export async function createStockAdjustment(payload) {
   );
 }
 
+// ============================================================================
+// SALES RETURNS & MOCK SALES REFERENCE DATA (Member 08 — Figma UI 20 & UI 21)
+// ============================================================================
+// Conforms strictly to:
+//   - database/modules/sales/05_create_sales_returns_table.sql (sales_returns)
+//   - database/modules/sales/06_create_sales_return_items_table.sql (sales_return_items)
+//   - database/modules/sales/01_create_sales_table.sql (sales)
+//   - database/modules/sales/02_create_sale_items_table.sql (sale_items)
+//
+// Assignment API endpoints:
+//   - GET  /api/v1/returns
+//   - POST /api/v1/returns
+//
+// IMPORTANT ADBMS RULES:
+//   - refund_subtotal in sales_return_items is GENERATED ALWAYS AS (quantity * refund_unit_price) STORED.
+//     It is calculated for display only and NEVER accepted or stored manually in submission payloads.
+//   - In development mock mode, creating a return adds a PENDING return in local memory only.
+//     It does NOT modify inventory quantities (sp_update_inventory), create stock_movements rows,
+//     or auto-approve/complete returns.
+// ============================================================================
+
+/**
+ * Exact ENUM values from database/modules/sales/05_create_sales_returns_table.sql
+ */
+export const VALID_RETURN_STATUSES = Object.freeze([
+  'PENDING',
+  'APPROVED',
+  'REJECTED',
+  'COMPLETED',
+]);
+
+export const RETURN_STATUS_META = Object.freeze({
+  PENDING: {
+    code: 'PENDING',
+    label: 'Pending',
+    badgeTone: 'amber',
+  },
+  APPROVED: {
+    code: 'APPROVED',
+    label: 'Approved',
+    badgeTone: 'blue',
+  },
+  REJECTED: {
+    code: 'REJECTED',
+    label: 'Rejected',
+    badgeTone: 'amber',
+  },
+  COMPLETED: {
+    code: 'COMPLETED',
+    label: 'Completed',
+    badgeTone: 'blue',
+  },
+});
+
+/**
+ * Mock completed sales and sale_items reference dataset (owned by Member 07 in production)
+ * used to validate return creation and calculate remaining eligible quantities.
+ */
+export const MOCK_SALES = Object.freeze([
+  {
+    sale_id: 2048,
+    customer_id: 301,
+    customer_name: 'Colombo Apparel Gallery',
+    invoice_number: 'INV-8801',
+    sale_date: '2026-11-17T14:22:00Z',
+    subtotal: 162000.0,
+    discount_amount: 0.0,
+    total_amount: 162000.0,
+    status: 'COMPLETED',
+    sale_label: 'Retail purchase',
+    items: [
+      {
+        sale_item_id: 7001,
+        sale_id: 2048,
+        variant_id: 107,
+        quantity: 36,
+        unit_price: 4500.0,
+      },
+      {
+        sale_item_id: 7002,
+        sale_id: 2048,
+        variant_id: 101,
+        quantity: 20,
+        unit_price: 1920.0,
+      },
+    ],
+  },
+  {
+    sale_id: 2047,
+    customer_id: 302,
+    customer_name: 'Nimali Perera',
+    invoice_number: 'INV-8795',
+    sale_date: '2026-11-16T15:18:00Z',
+    subtotal: 103680.0,
+    discount_amount: 3680.0,
+    total_amount: 100000.0,
+    status: 'COMPLETED',
+    sale_label: 'Repeat customer',
+    items: [
+      {
+        sale_item_id: 7003,
+        sale_id: 2047,
+        variant_id: 101,
+        quantity: 54,
+        unit_price: 1920.0,
+      },
+      {
+        sale_item_id: 7004,
+        sale_id: 2047,
+        variant_id: 109,
+        quantity: 12,
+        unit_price: 3200.0,
+      },
+    ],
+  },
+  {
+    sale_id: 2046,
+    customer_id: 303,
+    customer_name: 'Kandy Heritage Menswear',
+    invoice_number: 'INV-8760',
+    sale_date: '2026-11-14T16:05:00Z',
+    subtotal: 91200.0,
+    discount_amount: 1200.0,
+    total_amount: 90000.0,
+    status: 'COMPLETED',
+    sale_label: 'Multi-item order',
+    items: [
+      {
+        sale_item_id: 7005,
+        sale_id: 2046,
+        variant_id: 104,
+        quantity: 28,
+        unit_price: 2400.0,
+      },
+      {
+        sale_item_id: 7006,
+        sale_id: 2046,
+        variant_id: 108,
+        quantity: 10,
+        unit_price: 2400.0,
+      },
+    ],
+  },
+  {
+    sale_id: 2045,
+    customer_id: 304,
+    customer_name: 'Walk-in Retail Counter #2',
+    invoice_number: 'INV-8712',
+    sale_date: '2026-11-11T18:00:00Z',
+    subtotal: 190400.0,
+    discount_amount: 0.0,
+    total_amount: 190400.0,
+    status: 'COMPLETED',
+    sale_label: 'Walk-in sale',
+    items: [
+      {
+        sale_item_id: 7007,
+        sale_id: 2045,
+        variant_id: 103,
+        quantity: 64,
+        unit_price: 2975.0,
+      },
+      {
+        sale_item_id: 7008,
+        sale_id: 2045,
+        variant_id: 102,
+        quantity: 15,
+        unit_price: 1700.0,
+      },
+    ],
+  },
+  {
+    sale_id: 2044,
+    customer_id: 305,
+    customer_name: 'Galle Resort Boutique',
+    invoice_number: 'INV-8690',
+    sale_date: '2026-11-10T11:30:00Z',
+    subtotal: 79800.0,
+    discount_amount: 0.0,
+    total_amount: 79800.0,
+    status: 'COMPLETED',
+    sale_label: 'Boutique order',
+    items: [
+      {
+        sale_item_id: 7009,
+        sale_id: 2044,
+        variant_id: 105,
+        quantity: 25,
+        unit_price: 2200.0,
+      },
+      {
+        sale_item_id: 7010,
+        sale_id: 2044,
+        variant_id: 111,
+        quantity: 8,
+        unit_price: 3100.0,
+      },
+    ],
+  },
+  {
+    sale_id: 2043,
+    customer_id: 306,
+    customer_name: 'Negombo Textile Hub',
+    invoice_number: 'INV-8655',
+    sale_date: '2026-11-09T14:10:00Z',
+    subtotal: 68500.0,
+    discount_amount: 0.0,
+    total_amount: 68500.0,
+    status: 'COMPLETED',
+    sale_label: 'Retail purchase',
+    items: [
+      {
+        sale_item_id: 7011,
+        sale_id: 2043,
+        variant_id: 110,
+        quantity: 40,
+        unit_price: 1250.0,
+      },
+      {
+        sale_item_id: 7012,
+        sale_id: 2043,
+        variant_id: 112,
+        quantity: 5,
+        unit_price: 3700.0,
+      },
+    ],
+  },
+]);
+
+/**
+ * Initial mock dataset for sales_returns and sales_return_items.
+ * Note: refund_subtotal in sales_return_items is a MySQL STORED GENERATED column
+ * (quantity * refund_unit_price) and is calculated dynamically in enrichSalesReturn.
+ */
+const INITIAL_MOCK_SALES_RETURNS = [
+  {
+    return_id: 3011,
+    sale_id: 2047,
+    return_date: '2026-11-17T15:45:00Z',
+    return_reason: 'Size exchange return inspected and restocked into main retail inventory.',
+    total_refund_amount: 19200.0,
+    return_status: 'COMPLETED',
+    notes: 'Original tags attached; verified by counter supervisor.',
+    created_at: '2026-11-17T15:45:00Z',
+    items: [
+      {
+        return_item_id: 9001,
+        return_id: 3011,
+        sale_item_id: 7004,
+        quantity: 6,
+        refund_unit_price: 3200.0,
+      },
+    ],
+  },
+  {
+    return_id: 3010,
+    sale_id: 2048,
+    return_date: '2026-11-17T16:30:00Z',
+    return_reason: 'Sleeve length alteration mismatch on corporate blazer batch.',
+    total_refund_amount: 18000.0,
+    return_status: 'PENDING',
+    notes: 'Awaiting quality control inspection before approval.',
+    created_at: '2026-11-17T16:30:00Z',
+    items: [
+      {
+        return_item_id: 9002,
+        return_id: 3010,
+        sale_item_id: 7001,
+        quantity: 4,
+        refund_unit_price: 4500.0,
+      },
+    ],
+  },
+  {
+    return_id: 3009,
+    sale_id: 2046,
+    return_date: '2026-11-15T11:10:00Z',
+    return_reason: 'Unworn garments returned within 14-day policy window; tags verified intact.',
+    total_refund_amount: 9600.0,
+    return_status: 'COMPLETED',
+    notes: 'Refund credited against customer account.',
+    created_at: '2026-11-15T11:10:00Z',
+    items: [
+      {
+        return_item_id: 9003,
+        return_id: 3009,
+        sale_item_id: 7006,
+        quantity: 4,
+        refund_unit_price: 2400.0,
+      },
+    ],
+  },
+  {
+    return_id: 3008,
+    sale_id: 2045,
+    return_date: '2026-11-14T14:20:00Z',
+    return_reason: 'Customer requested colour swap on brushed fleece hoodie.',
+    total_refund_amount: 11900.0,
+    return_status: 'APPROVED',
+    notes: 'Approved by store manager; pending stock restoration.',
+    created_at: '2026-11-14T14:20:00Z',
+    items: [
+      {
+        return_item_id: 9004,
+        return_id: 3008,
+        sale_item_id: 7007,
+        quantity: 4,
+        refund_unit_price: 2975.0,
+      },
+    ],
+  },
+  {
+    return_id: 3007,
+    sale_id: 2044,
+    return_date: '2026-11-13T16:00:00Z',
+    return_reason: 'Garment washed prior to return attempt; outside return policy conditions.',
+    total_refund_amount: 6200.0,
+    return_status: 'REJECTED',
+    notes: 'Rejected after fabric inspection; item returned to customer.',
+    created_at: '2026-11-13T16:00:00Z',
+    items: [
+      {
+        return_item_id: 9005,
+        return_id: 3007,
+        sale_item_id: 7010,
+        quantity: 2,
+        refund_unit_price: 3100.0,
+      },
+    ],
+  },
+  {
+    return_id: 3006,
+    sale_id: 2046,
+    return_date: '2026-11-12T12:15:00Z',
+    return_reason: 'Waistband sizing discrepancy on stretch chino batch.',
+    total_refund_amount: 14400.0,
+    return_status: 'COMPLETED',
+    notes: 'Restocked 6 units into main distribution rack.',
+    created_at: '2026-11-12T12:15:00Z',
+    items: [
+      {
+        return_item_id: 9006,
+        return_id: 3006,
+        sale_item_id: 7005,
+        quantity: 6,
+        refund_unit_price: 2400.0,
+      },
+    ],
+  },
+  {
+    return_id: 3005,
+    sale_id: 2044,
+    return_date: '2026-11-11T15:40:00Z',
+    return_reason: 'Boutique seasonal display rotation return agreement.',
+    total_refund_amount: 11000.0,
+    return_status: 'APPROVED',
+    notes: 'Approved under boutique consignment terms.',
+    created_at: '2026-11-11T15:40:00Z',
+    items: [
+      {
+        return_item_id: 9007,
+        return_id: 3005,
+        sale_item_id: 7009,
+        quantity: 5,
+        refund_unit_price: 2200.0,
+      },
+    ],
+  },
+  {
+    return_id: 3004,
+    sale_id: 2043,
+    return_date: '2026-11-10T10:30:00Z',
+    return_reason: 'Minor packaging tear on crewneck tee multipack.',
+    total_refund_amount: 10000.0,
+    return_status: 'PENDING',
+    notes: 'Awaiting repackaging verification.',
+    created_at: '2026-11-10T10:30:00Z',
+    items: [
+      {
+        return_item_id: 9008,
+        return_id: 3004,
+        sale_item_id: 7011,
+        quantity: 8,
+        refund_unit_price: 1250.0,
+      },
+    ],
+  },
+];
+
+let mockSalesReturnsStore = INITIAL_MOCK_SALES_RETURNS.map((ret) => ({
+  ...ret,
+  items: ret.items.map((item) => ({ ...item })),
+}));
+
+/**
+ * Computes how many units of a specific sale_item_id have already been returned
+ * across non-rejected returns (PENDING, APPROVED, COMPLETED).
+ */
+export function getPreviouslyReturnedQuantity(saleItemId) {
+  const numericSaleItemId = Number(saleItemId);
+  return mockSalesReturnsStore.reduce((total, ret) => {
+    if (ret.return_status === 'REJECTED') {
+      return total;
+    }
+    const itemSum = (ret.items || [])
+      .filter((item) => Number(item.sale_item_id) === numericSaleItemId)
+      .reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+    return total + itemSum;
+  }, 0);
+}
+
+/**
+ * Enriches mock sales and their sale_items with variant metadata and live
+ * remaining eligible return quantities.
+ */
+export function getEnrichedMockSales() {
+  return MOCK_SALES.map((sale) => {
+    const enrichedItems = (sale.items || []).map((saleItem) => {
+      const variant =
+        MOCK_PRODUCT_VARIANTS.find(
+          (v) => v.variant_id === Number(saleItem.variant_id)
+        ) || {};
+      const previouslyReturned = getPreviouslyReturnedQuantity(
+        saleItem.sale_item_id
+      );
+      const remainingEligible = Math.max(
+        0,
+        Number(saleItem.quantity) - previouslyReturned
+      );
+
+      return {
+        ...saleItem,
+        sku: variant.sku || `VAR-${saleItem.variant_id}`,
+        product_name:
+          variant.product_name || `Product Variant #${saleItem.variant_id}`,
+        category_name: variant.category_name || 'Apparel / Retail',
+        size_name: variant.size_name || '—',
+        colour_name: variant.colour_name || '—',
+        previously_returned_quantity: previouslyReturned,
+        remaining_eligible_quantity: remainingEligible,
+        subtotal: Number((saleItem.quantity * saleItem.unit_price).toFixed(2)),
+      };
+    });
+
+    return {
+      ...sale,
+      sale_code: `SAL-${sale.sale_id}`,
+      items: enrichedItems,
+    };
+  });
+}
+
+/**
+ * Enriches a sales_returns record and its sales_return_items with sale/variant
+ * context and the display-only refund_subtotal (quantity * refund_unit_price).
+ */
+export function enrichSalesReturn(returnRecord) {
+  const sale =
+    MOCK_SALES.find((s) => s.sale_id === Number(returnRecord.sale_id)) || null;
+  const statusMeta = RETURN_STATUS_META[returnRecord.return_status] || {
+    code: returnRecord.return_status,
+    label: returnRecord.return_status,
+    badgeTone: 'amber',
+  };
+
+  const enrichedItems = (returnRecord.items || []).map((item) => {
+    const saleItem =
+      (sale?.items || []).find(
+        (si) => si.sale_item_id === Number(item.sale_item_id)
+      ) || null;
+    const variantId = saleItem?.variant_id ?? item.variant_id ?? null;
+    const variant =
+      MOCK_PRODUCT_VARIANTS.find((v) => v.variant_id === Number(variantId)) ||
+      {};
+    const qty = Number(item.quantity) || 0;
+    const unitPrice = Number(item.refund_unit_price) || 0;
+    // Display-only calculation matching MySQL GENERATED ALWAYS AS (quantity * refund_unit_price) STORED
+    const refundSubtotal = Number((qty * unitPrice).toFixed(2));
+
+    return {
+      return_item_id: item.return_item_id,
+      return_id: returnRecord.return_id,
+      sale_item_id: Number(item.sale_item_id),
+      variant_id: variantId,
+      quantity: qty,
+      quantity_sold: saleItem?.quantity ?? null,
+      refund_unit_price: unitPrice,
+      refund_subtotal: refundSubtotal,
+      sku: variant.sku || `VAR-${variantId || item.sale_item_id}`,
+      product_name:
+        variant.product_name || `Sale Item #${item.sale_item_id}`,
+      category_name: variant.category_name || 'Apparel / Retail',
+      size_name: variant.size_name || '—',
+      colour_name: variant.colour_name || '—',
+    };
+  });
+
+  const totalQuantityReturned = enrichedItems.reduce(
+    (sum, item) => sum + item.quantity,
+    0
+  );
+  const computedTotalRefund = Number(
+    enrichedItems
+      .reduce((sum, item) => sum + item.refund_subtotal, 0)
+      .toFixed(2)
+  );
+  const primaryItem = enrichedItems[0] || null;
+
+  return {
+    ...returnRecord,
+    total_refund_amount:
+      typeof returnRecord.total_refund_amount === 'number'
+        ? Number(returnRecord.total_refund_amount.toFixed(2))
+        : computedTotalRefund,
+    return_code: `RET-${returnRecord.return_id}`,
+    sale_code: `SAL-${returnRecord.sale_id}`,
+    invoice_number: sale?.invoice_number || `INV-${returnRecord.sale_id}`,
+    customer_name: sale?.customer_name || 'Retail Customer',
+    sale_label: sale?.sale_label || 'Retail purchase',
+    category_label: primaryItem?.category_name || 'Apparel / Retail',
+    status_label: statusMeta.label,
+    badge_tone: statusMeta.badgeTone,
+    items: enrichedItems,
+    item_count: enrichedItems.length,
+    primary_item: primaryItem,
+    total_quantity_returned: totalQuantityReturned,
+  };
+}
+
+/**
+ * Returns mock completed sales with their sale_items and remaining eligible return quantities.
+ * Development-only helper for the Create Return form (Figma UI 21).
+ */
+export async function getMockSalesForReturns() {
+  return {
+    items: getEnrichedMockSales(),
+    isMockMode: IS_DEVELOPMENT_MOCK_MODE,
+  };
+}
+
+/**
+ * Fetch list of sales returns.
+ * Maps to assignment endpoint: GET /api/v1/returns
+ *
+ * @param {Object} [options]
+ * @param {boolean} [options.simulateError=false]
+ * @returns {Promise<{ items: Array, total: number, isMockMode: boolean, endpoint: string }>}
+ */
+export async function getSalesReturns(options = {}) {
+  const { simulateError = false } = options;
+
+  if (IS_DEVELOPMENT_MOCK_MODE) {
+    if (simulateError) {
+      throw new Error(
+        'Simulated error while reading local development mock sales returns dataset.'
+      );
+    }
+
+    const items = mockSalesReturnsStore.map(enrichSalesReturn);
+    return {
+      items,
+      total: items.length,
+      isMockMode: true,
+      endpoint: API_ENDPOINTS.LIST_RETURNS,
+    };
+  }
+
+  throw new Error(
+    `Backend API integration (${API_ENDPOINTS.LIST_RETURNS}) requires frontend/src/services/api.js (Member 02) and FastAPI backend.`
+  );
+}
+
+/**
+ * Development-only detail lookup helper for the UI modal.
+ * Note: The assignment specification defines GET /api/v1/returns and POST /api/v1/returns,
+ * so this helper looks up the return from the local dataset without inventing an unapproved endpoint.
+ *
+ * @param {number|string} returnId
+ * @returns {Promise<{ item: Object, isMockMode: boolean }>}
+ */
+export async function getSalesReturnByIdDevOnly(returnId) {
+  const numericId = Number(returnId);
+
+  if (IS_DEVELOPMENT_MOCK_MODE) {
+    const found = mockSalesReturnsStore.find(
+      (ret) => ret.return_id === numericId
+    );
+
+    if (!found) {
+      throw new Error(`Sales return record #${returnId} was not found.`);
+    }
+
+    return {
+      item: enrichSalesReturn(found),
+      isMockMode: true,
+    };
+  }
+
+  throw new Error(
+    `Backend API integration (${API_ENDPOINTS.LIST_RETURNS}) requires frontend/src/services/api.js (Member 02) and FastAPI backend.`
+  );
+}
+
+/**
+ * Submit a new sales return in development mock mode.
+ * Maps to assignment endpoint: POST /api/v1/returns
+ *
+ * Enforces SQL schema constraints:
+ *   - sale_id: must reference a valid existing sale in sales
+ *   - return_reason: required non-empty string <= 255 chars (chk_return_reason_not_empty)
+ *   - return_status: always initialized as 'PENDING'
+ *   - items: at least 1 item, sale_item_id must belong to sale_id,
+ *            quantity > 0 (chk_return_item_quantity),
+ *            quantity <= remaining_eligible_quantity (accounting for prior non-rejected returns),
+ *            refund_unit_price >= 0 (chk_return_item_refund_price)
+ *   - refund_subtotal is NEVER accepted or stored manually (MySQL GENERATED ALWAYS column)
+ *   - Does NOT modify inventory quantities, create stock_movements, or process real refunds.
+ */
+export async function createSalesReturn(payload) {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Invalid sales return payload.');
+  }
+
+  const saleId = Number(payload.sale_id);
+  if (!Number.isInteger(saleId) || saleId <= 0) {
+    throw new Error('A valid original sale (sale_id) must be selected.');
+  }
+
+  const enrichedSales = getEnrichedMockSales();
+  const matchedSale = enrichedSales.find((s) => s.sale_id === saleId);
+  if (!matchedSale) {
+    throw new Error(`Original sale #${payload.sale_id} does not exist.`);
+  }
+
+  const trimmedReason = String(payload.return_reason ?? '').trim();
+  if (!trimmedReason) {
+    throw new Error('Return reason is required (chk_return_reason_not_empty).');
+  }
+  if (trimmedReason.length > 255) {
+    throw new Error(
+      'Return reason cannot exceed 255 characters (VARCHAR(255)).'
+    );
+  }
+
+  const rawItems = Array.isArray(payload.items) ? payload.items : [];
+  if (rawItems.length === 0) {
+    throw new Error('At least one returned sale item is required.');
+  }
+
+  const seenSaleItems = new Set();
+  let nextReturnItemId =
+    mockSalesReturnsStore.reduce(
+      (maxId, ret) =>
+        Math.max(
+          maxId,
+          ...(ret.items || []).map((i) => Number(i.return_item_id) || 0)
+        ),
+      9000
+    ) + 1;
+
+  let calculatedTotalRefund = 0;
+
+  const validatedItems = rawItems.map((rawItem, index) => {
+    if ('refund_subtotal' in rawItem) {
+      throw new Error(
+        'Do not submit refund_subtotal manually; it is a MySQL GENERATED ALWAYS STORED column.'
+      );
+    }
+
+    const saleItemId = Number(rawItem.sale_item_id);
+    if (!Number.isInteger(saleItemId) || saleItemId <= 0) {
+      throw new Error(
+        `Item #${index + 1}: A valid sale item (sale_item_id) must be selected.`
+      );
+    }
+
+    const matchedSaleItem = (matchedSale.items || []).find(
+      (si) => si.sale_item_id === saleItemId
+    );
+    if (!matchedSaleItem) {
+      throw new Error(
+        `Item #${index + 1}: Sale item #${saleItemId} does not belong to selected sale ${matchedSale.invoice_number} (SAL-${matchedSale.sale_id}).`
+      );
+    }
+
+    if (seenSaleItems.has(saleItemId)) {
+      throw new Error(
+        `Duplicate sale item #${saleItemId} in the same return submission.`
+      );
+    }
+    seenSaleItems.add(saleItemId);
+
+    const qty = Number(rawItem.quantity);
+    if (
+      rawItem.quantity === '' ||
+      rawItem.quantity === null ||
+      rawItem.quantity === undefined ||
+      !Number.isInteger(qty) ||
+      qty <= 0
+    ) {
+      throw new Error(
+        `Item #${index + 1}: Return quantity must be a whole integer greater than 0 (chk_return_item_quantity).`
+      );
+    }
+
+    if (qty > matchedSaleItem.remaining_eligible_quantity) {
+      throw new Error(
+        `Item #${index + 1} (${matchedSaleItem.sku}): Return quantity (${qty}) exceeds remaining eligible quantity (${matchedSaleItem.remaining_eligible_quantity}). Sold: ${matchedSaleItem.quantity}, Previously returned: ${matchedSaleItem.previously_returned_quantity}.`
+      );
+    }
+
+    const refundUnitPrice =
+      rawItem.refund_unit_price !== undefined &&
+      rawItem.refund_unit_price !== null &&
+      rawItem.refund_unit_price !== ''
+        ? Number(rawItem.refund_unit_price)
+        : Number(matchedSaleItem.unit_price);
+
+    if (Number.isNaN(refundUnitPrice) || refundUnitPrice < 0) {
+      throw new Error(
+        `Item #${index + 1}: refund_unit_price must be a non-negative number (chk_return_item_refund_price).`
+      );
+    }
+
+    calculatedTotalRefund += Number((qty * refundUnitPrice).toFixed(2));
+
+    return {
+      return_item_id: nextReturnItemId++,
+      sale_item_id: saleItemId,
+      quantity: qty,
+      refund_unit_price: Number(refundUnitPrice.toFixed(2)),
+    };
+  });
+
+  if (IS_DEVELOPMENT_MOCK_MODE) {
+    const nextReturnId =
+      mockSalesReturnsStore.reduce(
+        (maxId, ret) => Math.max(maxId, Number(ret.return_id) || 0),
+        3010
+      ) + 1;
+
+    const nowIso = new Date().toISOString();
+    const returnDateIso = payload.return_date
+      ? new Date(payload.return_date).toISOString()
+      : nowIso;
+    const trimmedNotes = payload.notes ? String(payload.notes).trim() : null;
+
+    const newReturnRecord = {
+      return_id: nextReturnId,
+      sale_id: saleId,
+      return_date: returnDateIso,
+      return_reason: trimmedReason,
+      total_refund_amount: Number(calculatedTotalRefund.toFixed(2)),
+      return_status: 'PENDING',
+      notes: trimmedNotes,
+      created_at: nowIso,
+      items: validatedItems.map((item) => ({
+        ...item,
+        return_id: nextReturnId,
+      })),
+    };
+
+    mockSalesReturnsStore = [newReturnRecord, ...mockSalesReturnsStore];
+
+    return {
+      item: enrichSalesReturn(newReturnRecord),
+      isMockMode: true,
+      endpoint: API_ENDPOINTS.CREATE_RETURN,
+      notice:
+        'Development mock submission only: Added as PENDING in local memory. No database save, inventory restoration (sp_update_inventory), stock_movements record, or financial refund was processed.',
+    };
+  }
+
+  throw new Error(
+    `Backend API integration (${API_ENDPOINTS.CREATE_RETURN}) requires frontend/src/services/api.js (Member 02) and FastAPI backend.`
+  );
+}
+
 export default {
   IS_DEVELOPMENT_MOCK_MODE,
   API_ENDPOINTS,
@@ -1230,10 +2010,17 @@ export default {
   ADJUSTMENT_TYPE_META,
   ADJUSTMENT_STATUS_META,
   MOCK_PRODUCT_VARIANTS,
+  VALID_RETURN_STATUSES,
+  RETURN_STATUS_META,
+  MOCK_SALES,
   getStockMovements,
   getStockMovementById,
   getMockProductVariants,
   getStockAdjustments,
   getStockAdjustmentById,
   createStockAdjustment,
+  getMockSalesForReturns,
+  getSalesReturns,
+  getSalesReturnByIdDevOnly,
+  createSalesReturn,
 };
