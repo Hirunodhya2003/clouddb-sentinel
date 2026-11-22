@@ -23,3 +23,33 @@ class SalesTrendPoint(BaseModel):
     orders_count: int = 0
     revenue: float = 0.0
     discounts: float = 0.0
+
+
+class InventoryCategorySlice(BaseModel):
+    category_id: Optional[int] = None
+    category_name: str
+    product_count: int = 0
+    variant_count: int = 0
+    units_on_hand: int = 0
+    retail_value: float = 0.0
+    cost_value: float = 0.0
+    low_stock_count: int = 0
+
+
+class RecentTransactionItem(BaseModel):
+    transaction_type: Literal["SALE", "PURCHASE", "MOVEMENT"]
+    record_id: int
+    reference_number: str
+    counterparty: str
+    amount: float = 0.0
+    quantity: Optional[int] = None
+    status: str
+    occurred_at: Optional[datetime] = None
+
+
+class DashboardOverviewResponse(BaseModel):
+    summary_cards: list[SummaryMetricCard]
+    sales_chart: list[SalesTrendPoint]
+    inventory_chart: list[InventoryCategorySlice]
+    recent_transactions: list[RecentTransactionItem]
+    generated_at: datetime
