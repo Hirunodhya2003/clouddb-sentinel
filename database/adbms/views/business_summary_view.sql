@@ -47,4 +47,42 @@ SELECT
         (SELECT COALESCE(SUM(p.total_amount), 0.00)
          FROM purchases p
          WHERE p.status = 'RECEIVED')
-    ) AS estimated_net_cashflow;
+    ) AS estimated_net_cashflow,
+
+    -- Catalog & Inventory KPIs
+    (SELECT COUNT(*)
+     FROM products pr
+     WHERE pr.status = 'active') AS active_products_count,
+
+    (SELECT COUNT(*)
+     FROM product_variants pv
+     WHERE pv.is_active = TRUE) AS active_variants_count,
+
+    (SELECT COALESCE(SUM(i.quantity_on_hand), 0)
+     FROM inventory i) AS total_units_in_stock,
+
+    (SELECT COALESCE(ROUND(SUM(i.quantity_on_hand * pv.cost_price), 2), 0.00)
+     FROM inventory i
+     INNER JOIN product_variants pv ON pv.variant_id = i.variant_id) AS inventory_cost_value,
+
+    (SELECT COALESCE(ROUND(SUM(i.quantity_on_hand * pv.selling_price), 2), 0.00)
+     FROM inventory i
+     INNER JOIN product_variants pv ON pv.variant_id = i.variant_id) AS inventory_retail_value,
+
+    (SELECT COUNT(*)
+     FROM inventory i
+     WHERE i.quantity_on_hand <= i.reorder_level
+       AND i.quantity_on_hand > 0) AS low_stock_variants_count,
+
+    (SELECT COUNT(*)
+     FROM inventory i
+     WHERE i.quantity_on_hand = 0) AS out_of_stock_variants_count,
+
+    -- Customer & Supplier KPIs
+    (SELECT COUNT(*)
+     FROM customers c
+     WHERE c.status = 'Active') AS active_customers_count,
+
+    (SELECT COUNT(*)
+     FROM suppliers sup
+     WHERE sup.is_active = TRUE) AS active_suppliers_count;
