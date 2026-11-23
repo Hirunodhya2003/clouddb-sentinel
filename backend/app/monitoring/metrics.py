@@ -69,3 +69,103 @@ class MetricsCollector:
             self._db_query_duration_sum_ms[qtype] += safe_duration
             if slow_flag:
                 self._db_slow_queries_total[qtype] += 1
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            total_requests = sum(self._http_requests_total.values())
+            total_errors = sum(
+                count for (_, _, code), count in self._http_requests_total.items() if code >= 500
+            )
+            total_duration = sum(self._http_duration_sum_ms.values())
+            avg_latency_ms = round(total_duration / total_requests, 3) if total_requests else 0.0
+
+            total_queries = sum(self._db_queries_total.values())
+            total_slow_queries = sum(self._db_slow_queries_total.values())
+            total_db_duration = sum(self._db_query_duration_sum_ms.values())
+            avg_db_ms = round(total_db_duration / total_queries, 3) if total_queries else 0.0
+
+            return {
+                "uptime_seconds": round(time.time() - self.started_at, 2),
+                "active_requests": self._active_requests,
+                "http_requests_total": total_requests,
+                "http_5xx_errors_total": total_errors,
+                "http_avg_latency_ms": avg_latency_ms,
+                "db_queries_total": total_queries,
+                "db_slow_queries_total": total_slow_queries,
+                "db_avg_query_ms": avg_db_ms,
+                "queries_by_type": dict(self._db_queries_total),
+            }
+
+    def render_prometheus_text(self) -> str:
+        """Render collected metrics in Prometheus text exposition format (0.0.4)."""
+        lines: list[str] = []
+        with self._lock:
+            uptime = max(0.0, time.time() - self.started_at)
+            lines.extend([
+                "# HELP clouddb_process_uptime_seconds Application process uptime in seconds.",
+                "# TYPE clouddb_process_uptime_seconds gauge",
+                f"clouddb_process_uptime_seconds {uptime:.2f}",
+                "# HELP clouddb_http_active_requests Number of in-flight HTTP requests.",
+                "# TYPE clouddb_http_active_requests gauge",
+                f"clouddb_http_active_requests {self._active_requests}",
+                "# HELP clouddb_http_requests_total Total HTTP requests processed.",
+                "# TYPE clouddb_http_requests_total counter",
+            ])
+            for (method, path, status_code), count in sorted(self._http_requests_total.items()):
+                escaped_path = path.replace("\\", "\\\\").replace('"', '\\"')
+                lines.append(
+                    f'clouddb_http_requests_total{{method="{method}",path="{escaped_path}",status="{status_code}"}} {count}'
+                )
+
+            lines.extend([
+                "# HELP clouddb_http_request_duration_ms HTTP request latency histogram in milliseconds.",
+                "# TYPE clouddb_http_request_duration_ms histogram",
+            ])
+            for (method, path), total_count in sorted(self._http_duration_count.items()):
+                escaped_path = path.replace("\\", "\\\\").replace('"', '\\"')
+                for bound in self.LATENCY_BUCKETS_MS:
+                    bucket_val = self._http_duration_buckets.get((method, path, bound), 0)
+                    lines.append(
+                        f'clouddb_http_request_duration_ms_bucket{{method="{method}",path="{escaped_path}",le="{bound}"}} {bucket_val}'
+                    )
+                lines.append(
+                    f'clouddb_http_request_duration_ms_bucket{{method="{method}",path="{escaped_path}",le="+Inf"}} {total_count}'
+                )
+                sum_ms = self._http_duration_sum_ms.get((method, path), 0.0)
+                lines.append(
+                    f'clouddb_http_request_duration_ms_sum{{method="{method}",path="{escaped_path}"}} {sum_ms:.3f}'
+                )
+                lines.append(
+                    f'clouddb_http_request_duration_ms_count{{method="{method}",path="{escaped_path}"}} {total_count}'
+                )
+
+            lines.extend([
+                "# HELP clouddb_db_queries_total Total database queries instrumented.",
+                "# TYPE clouddb_db_queries_total counter",
+            ])
+            for qtype, count in sorted(self._db_queries_total.items()):
+                lines.append(f'clouddb_db_queries_total{{query_type="{qtype}"}} {count}')
+
+            lines.extend([
+                "# HELP clouddb_db_slow_queries_total Total slow database queries exceeding threshold.",
+                "# TYPE clouddb_db_slow_queries_total counter",
+            ])
+            for qtype, count in sorted(self._db_slow_queries_total.items()):
+                lines.append(f'clouddb_db_slow_queries_total{{query_type="{qtype}"}} {count}')
+
+        lines.append("")
+        return "\n".join(lines)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._active_requests = 0
+            self._http_requests_total.clear()
+            self._http_duration_sum_ms.clear()
+            self._http_duration_count.clear()
+            self._http_duration_buckets.clear()
+            self._db_queries_total.clear()
+            self._db_slow_queries_total.clear()
+            self._db_query_duration_sum_ms.clear()
+
+
+metrics_collector = MetricsCollector()
