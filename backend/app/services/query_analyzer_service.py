@@ -138,3 +138,181 @@ class QueryAnalyzerService:
     @staticmethod
     def get_presets() -> list[PresetQueryScenario]:
         return PRESET_SCENARIOS
+
+    @staticmethod
+    def _build_suggestions(
+        cleaned_sql: str,
+        steps: list[ExplainPlanStep],
+        uses_full_scan: bool,
+        uses_filesort: bool,
+        uses_temp: bool,
+    ) -> list[str]:
+        suggestions: list[str] = []
+        upper_sql = cleaned_sql.upper()
+
+        if re.search(r"\bSELECT\s+\*", upper_sql):
+            suggestions.append(
+                "Avoid SELECT *; project only required columns to reduce I/O and enable covering indexes."
+            )
+        if re.search(r"LIKE\s+'%[^']+%'", upper_sql):
+            suggestions.append(
+                "Leading wildcard LIKE '%term%' prevents B-Tree index usage; prefer prefix matching LIKE 'term%' or exact equality."
+            )
+        if uses_full_scan:
+            scanned_tables = [s.table_name for s in steps if s.access_type.upper() == "ALL" and s.table_name]
+            target = ", ".join(scanned_tables) if scanned_tables else "target table(s)"
+            suggestions.append(
+                f"Full table scan (type=ALL) detected on {target}. Ensure WHERE/JOIN columns use sargable predicates backed by an index."
+            )
+        if uses_filesort:
+            suggestions.append(
+                "Extra contains 'Using filesort'. Align ORDER BY columns with a composite index to avoid an extra sort pass."
+            )
+        if uses_temp:
+            suggestions.append(
+                "Extra contains 'Using temporary'. Optimize GROUP BY / DISTINCT columns to match index order."
+            )
+        if not suggestions:
+            suggestions.append(
+                "Execution plan looks well-optimized: selective index access is used with no full table scans or temporary sort tables."
+            )
+        return suggestions
+
+    def analyze_query(
+        self,
+        sql: str,
+        *,
+        analyze: bool = False,
+        endpoint: Optional[str] = "/api/v1/query-analyzer/explain",
+        record_log: bool = True,
+    ) -> ExplainAnalysisResult:
+        cleaned_sql = sanitize_readonly_select(sql)
+        fingerprint = compute_query_fingerprint(cleaned_sql)
+
+        raw = self.repository.execute_explain(cleaned_sql, analyze=analyze)
+        steps = [ExplainPlanStep(**s) for s in raw["steps"]]
+
+        total_rows = sum(max(0, s.rows_estimated) for s in steps)
+        uses_full_scan = any(s.access_type.upper() == "ALL" for s in steps)
+        uses_index = any(
+            bool(s.key_used) or s.access_type.upper() in {"CONST", "EQ_REF", "REF", "RANGE", "INDEX"}
+            for s in steps
+        )
+        uses_filesort = any("FILESORT" in (s.extra or "").upper() for s in steps)
+        uses_temp = any("TEMPORARY" in (s.extra or "").upper() for s in steps)
+
+        suggestions = self._build_suggestions(
+            cleaned_sql=cleaned_sql,
+            steps=steps,
+            uses_full_scan=uses_full_scan,
+            uses_filesort=uses_filesort,
+            uses_temp=uses_temp,
+        )
+
+        if uses_full_scan and (uses_filesort or uses_temp or re.search(r"\bSELECT\s+\*", cleaned_sql.upper())):
+            severity = "critical"
+        elif uses_full_scan or uses_filesort or uses_temp or re.search(r"\bSELECT\s+\*", cleaned_sql.upper()):
+            severity = "warning"
+        else:
+            severity = "optimal"
+
+        mode = "EXPLAIN_ANALYZE" if analyze else "EXPLAIN"
+        exec_ms = float(raw["execution_time_ms"])
+
+        if record_log:
+            self.repository.create_query_log(
+                query_type=mode,
+                query_fingerprint=fingerprint,
+                query_text=cleaned_sql,
+                execution_time_ms=exec_ms,
+                rows_examined=total_rows,
+                rows_returned=len(steps),
+                is_slow_query=exec_ms >= self.SLOW_THRESHOLD_MS,
+                endpoint=endpoint,
+            )
+
+        return ExplainAnalysisResult(
+            query_text=cleaned_sql,
+            query_fingerprint=fingerprint,
+            mode=mode,
+            dialect=raw["dialect"],
+            execution_time_ms=exec_ms,
+            total_estimated_rows=total_rows,
+            uses_index=uses_index,
+            uses_full_table_scan=uses_full_scan,
+            uses_filesort=uses_filesort,
+            uses_temp_table=uses_temp,
+            steps=steps,
+            analyze_tree=raw["analyze_tree"],
+            optimization_suggestions=suggestions,
+            severity=severity,
+        )
+
+    def compare_plans(
+        self,
+        original_sql: str,
+        optimized_sql: str,
+        *,
+        analyze: bool = False,
+    ) -> PlanComparisonResponse:
+        orig_res = self.analyze_query(
+            original_sql,
+            analyze=analyze,
+            endpoint="/api/v1/query-analyzer/compare",
+            record_log=True,
+        )
+        opt_res = self.analyze_query(
+            optimized_sql,
+            analyze=analyze,
+            endpoint="/api/v1/query-analyzer/compare",
+            record_log=True,
+        )
+
+        rows_delta = orig_res.total_estimated_rows - opt_res.total_estimated_rows
+        if orig_res.total_estimated_rows > 0:
+            reduction_pct = round((rows_delta / orig_res.total_estimated_rows) * 100.0, 2)
+        else:
+            reduction_pct = 0.0
+
+        time_delta = round(orig_res.execution_time_ms - opt_res.execution_time_ms, 3)
+        access_improved = (orig_res.uses_full_table_scan and not opt_res.uses_full_table_scan) or (
+            not orig_res.uses_index and opt_res.uses_index
+        )
+
+        severity_rank = {"optimal": 0, "warning": 1, "critical": 2}
+        orig_score = (
+            severity_rank[orig_res.severity] * 1000
+            + orig_res.total_estimated_rows
+        )
+        opt_score = (
+            severity_rank[opt_res.severity] * 1000
+            + opt_res.total_estimated_rows
+        )
+
+        if opt_score < orig_score:
+            winner = "optimized"
+            summary = (
+                f"Optimized query improved the execution plan "
+                f"(estimated rows examined reduced by {max(0.0, reduction_pct):.1f}%)."
+            )
+        elif opt_score > orig_score:
+            winner = "original"
+            summary = "Baseline query produced a lower-cost execution plan than the candidate query."
+        else:
+            winner = "tie"
+            summary = "Both queries produced equivalent execution plan characteristics on the current dataset."
+
+        return PlanComparisonResponse(
+            original=orig_res,
+            optimized=opt_res,
+            estimated_rows_delta=rows_delta,
+            estimated_rows_reduction_pct=reduction_pct,
+            execution_time_delta_ms=time_delta,
+            access_improved=access_improved,
+            winner=winner,
+            summary=summary,
+        )
+
+    def get_recent_history(self, limit: int = 20) -> list[SlowQueryLogItem]:
+        logs = self.repository.list_query_logs(limit=limit)
+        return [SlowQueryLogItem.model_validate(item) for item in logs]
