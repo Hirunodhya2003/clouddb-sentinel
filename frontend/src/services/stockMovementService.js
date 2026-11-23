@@ -2000,6 +2000,44 @@ export async function createSalesReturn(payload) {
   );
 }
 
+/**
+ * Read-only aggregated history snapshot for MovementHistory.jsx.
+ * Reuses the existing getStockMovements, getStockAdjustments, getSalesReturns,
+ * and getMockProductVariants service functions without duplicating mock datasets.
+ *
+ * Maps to read-only assignment endpoints:
+ *   - GET /api/v1/stock-movements
+ *   - GET /api/v1/stock-adjustments
+ *   - GET /api/v1/returns
+ *
+ * @param {Object} [options]
+ * @param {boolean} [options.simulateError=false]
+ */
+export async function getMovementHistorySnapshot(options = {}) {
+  const { simulateError = false } = options;
+
+  const [movementsRes, adjustmentsRes, returnsRes, variantsRes] =
+    await Promise.all([
+      getStockMovements({ simulateError }),
+      getStockAdjustments({ simulateError }),
+      getSalesReturns({ simulateError }),
+      getMockProductVariants(),
+    ]);
+
+  return {
+    movements: movementsRes.items,
+    adjustments: adjustmentsRes.items,
+    returns: returnsRes.items,
+    variants: variantsRes.items,
+    isMockMode: IS_DEVELOPMENT_MOCK_MODE,
+    endpoints: {
+      movements: API_ENDPOINTS.LIST_STOCK_MOVEMENTS,
+      adjustments: API_ENDPOINTS.LIST_STOCK_ADJUSTMENTS,
+      returns: API_ENDPOINTS.LIST_RETURNS,
+    },
+  };
+}
+
 export default {
   IS_DEVELOPMENT_MOCK_MODE,
   API_ENDPOINTS,
@@ -2023,4 +2061,5 @@ export default {
   getSalesReturns,
   getSalesReturnByIdDevOnly,
   createSalesReturn,
+  getMovementHistorySnapshot,
 };
