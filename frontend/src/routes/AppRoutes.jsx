@@ -12,6 +12,7 @@ import ProductList from "../pages/products/ProductList.jsx";
 import ProductDetails from "../pages/products/ProductDetails.jsx";
 import CreateProduct from "../pages/products/CreateProduct.jsx";
 import EditProduct from "../pages/products/EditProduct.jsx";
+import SchemaViewer from "../pages/schema-viewer/SchemaViewer.jsx";
 
 const soon = (title) => <ComingSoon title={title} />;
 
@@ -35,7 +36,7 @@ export default function AppRoutes() {
         <Route path="/categories" element={<CategoryList />} />
         <Route path="/categories/new" element={<CreateCategory />} />
         <Route path="/categories/:id/edit" element={<EditCategory />} />
-        <Route path="/schema-viewer" element={soon("Schema viewer")} />
+        <Route path="/schema-viewer" element={<SchemaViewer />} />
 
         {/* Other members: replace as pages are merged */}
         <Route path="/variants" element={soon("Variants")} />
