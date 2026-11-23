@@ -8,6 +8,10 @@ import ComingSoon from "../pages/shared/ComingSoon.jsx";
 import CategoryList from "../pages/categories/CategoryList.jsx";
 import CreateCategory from "../pages/categories/CreateCategory.jsx";
 import EditCategory from "../pages/categories/EditCategory.jsx";
+import ProductList from "../pages/products/ProductList.jsx";
+import ProductDetails from "../pages/products/ProductDetails.jsx";
+import CreateProduct from "../pages/products/CreateProduct.jsx";
+import EditProduct from "../pages/products/EditProduct.jsx";
 
 const soon = (title) => <ComingSoon title={title} />;
 
@@ -24,7 +28,10 @@ export default function AppRoutes() {
         <Route path="/dashboard" element={soon("Dashboard")} />
 
         {/* Member 02 */}
-        <Route path="/products" element={soon("Products")} />
+        <Route path="/products" element={<ProductList />} />
+        <Route path="/products/new" element={<CreateProduct />} />
+        <Route path="/products/:id" element={<ProductDetails />} />
+        <Route path="/products/:id/edit" element={<EditProduct />} />
         <Route path="/categories" element={<CategoryList />} />
         <Route path="/categories/new" element={<CreateCategory />} />
         <Route path="/categories/:id/edit" element={<EditCategory />} />
