@@ -1,6 +1,12 @@
-import { useState } from "react";
 import CustomerForm from "../../components/customers/CustomerForm";
 import CustomerDetails from "./CustomerDetails";
+import { useEffect, useRef, useState } from "react";
+import {
+  getCustomers,
+  createCustomer,
+  updateCustomer,
+  deleteCustomer,
+} from "../../services/customerService";
 
 export default function CustomerList() {
   const [search, setSearch] = useState("");
@@ -22,39 +28,102 @@ export default function CustomerList() {
     ),
   );
 
-  function handleSave(customer) {
-    if (editingCustomer) {
-      setCustomers((previous) =>
-        previous.map((item) =>
-          item.id === editingCustomer.id ? { ...item, ...customer } : item,
-        ),
-      );
-    } else {
-      setCustomers((previous) => [
-        ...previous,
-        { ...customer, id: crypto.randomUUID() },
-      ]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const mutationInProgress = useRef(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadCustomers() {
+      try {
+        const records = await getCustomers(controller.signal);
+        setCustomers(records);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setError(error.message);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
     }
 
-    setShowForm(false);
-    setEditingCustomer(null);
+    loadCustomers();
+
+    return () => controller.abort();
+  }, []);
+
+  async function handleSave(customer) {
+    if (mutationInProgress.current) return;
+
+    mutationInProgress.current = true;
+    setSaving(true);
+    setError("");
+
+    try {
+      if (editingCustomer) {
+        const updated = await updateCustomer(editingCustomer.id, customer);
+
+        setCustomers((previous) =>
+          previous.map((item) => (item.id === updated.id ? updated : item)),
+        );
+      } else {
+        const created = await createCustomer(customer);
+        setCustomers((previous) => [created, ...previous]);
+      }
+
+      setShowForm(false);
+      setEditingCustomer(null);
+    } catch (error) {
+      setError(error.message);
+    } finally {
+      mutationInProgress.current = false;
+      setSaving(false);
+    }
   }
 
-  function confirmDelete() {
-    if (!customerToDelete) return;
+  async function confirmDelete() {
+    if (!customerToDelete || mutationInProgress.current) return;
 
-    setCustomers((previous) =>
-      previous.filter((customer) => customer.id !== customerToDelete.id),
-    );
-    if (selectedCustomerId === customerToDelete.id) {
-      setSelectedCustomerId(null);
+    mutationInProgress.current = true;
+    setSaving(true);
+    setError("");
+
+    const customerId = customerToDelete.id;
+
+    try {
+      await deleteCustomer(customerId);
+
+      setCustomers((previous) =>
+        previous.filter((customer) => customer.id !== customerId),
+      );
+
+      if (editingCustomer?.id === customerId) {
+        setShowForm(false);
+        setEditingCustomer(null);
+      }
+
+      if (selectedCustomerId === customerId) {
+        setSelectedCustomerId(null);
+      }
+
+      setCustomerToDelete(null);
+    } catch (error) {
+      setError(error.message);
+    } finally {
+      mutationInProgress.current = false;
+      setSaving(false);
     }
-
-    setCustomerToDelete(null);
   }
 
   return (
     <>
+      {error && <p role="alert">{error}</p>}
+      {loading && <p role="status">Loading customers...</p>}
+      {saving && <p role="status">Saving changes...</p>}
       <div className="page-heading">
         <h1>Customers</h1>
         <p>Customer directory and contact information</p>
@@ -76,6 +145,7 @@ export default function CustomerList() {
           key={editingCustomer?.id ?? "new"}
           initialCustomer={editingCustomer}
           onSave={handleSave}
+          saving={saving}
           onCancel={() => {
             setShowForm(false);
             setEditingCustomer(null);
@@ -186,7 +256,7 @@ export default function CustomerList() {
                 </tr>
               ))}
 
-              {filteredCustomers.length === 0 && (
+              {!loading && !error && filteredCustomers.length === 0 && (
                 <tr>
                   <td colSpan={5} className="empty-state">
                     {search.trim()
