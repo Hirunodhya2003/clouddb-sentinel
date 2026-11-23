@@ -1,5 +1,6 @@
 // Owner: Member 02
-// TODO: wrap <AppRoutes /> with BrowserRouter + AuthContext provider
+import AppRoutes from "./routes/AppRoutes.jsx";
+
 export default function App() {
-  return <div>CloudDB Sentinel</div>;
+  return <AppRoutes />;
 }
