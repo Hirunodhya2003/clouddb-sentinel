@@ -149,3 +149,169 @@ class DashboardRepository:
                 }
             )
         return result
+
+    def get_inventory_by_category(self) -> list[dict[str, Any]]:
+        tables = self._existing_tables()
+        required = {"categories", "products", "product_variants", "inventory"}
+        if not required.issubset(tables):
+            return []
+
+        rows = self.db.execute(
+            text(
+                """
+                SELECT
+                    c.category_id,
+                    c.category_name,
+                    COUNT(DISTINCT p.product_id) AS product_count,
+                    COUNT(DISTINCT pv.variant_id) AS variant_count,
+                    COALESCE(SUM(i.quantity_on_hand), 0) AS units_on_hand,
+                    COALESCE(SUM(i.quantity_on_hand * pv.selling_price), 0) AS retail_value,
+                    COALESCE(SUM(i.quantity_on_hand * pv.cost_price), 0) AS cost_value,
+                    SUM(CASE WHEN i.quantity_on_hand <= i.reorder_level AND i.inventory_id IS NOT NULL THEN 1 ELSE 0 END) AS low_stock_count
+                FROM categories c
+                LEFT JOIN products p ON p.category_id = c.category_id
+                LEFT JOIN product_variants pv ON pv.product_id = p.product_id
+                LEFT JOIN inventory i ON i.variant_id = pv.variant_id
+                GROUP BY c.category_id, c.category_name
+                ORDER BY retail_value DESC, c.category_name ASC
+                """
+            )
+        ).mappings().all()
+
+        return [
+            {
+                "category_id": int(r["category_id"]) if r["category_id"] is not None else None,
+                "category_name": str(r["category_name"]),
+                "product_count": int(r["product_count"] or 0),
+                "variant_count": int(r["variant_count"] or 0),
+                "units_on_hand": int(r["units_on_hand"] or 0),
+                "retail_value": round(float(r["retail_value"] or 0.0), 2),
+                "cost_value": round(float(r["cost_value"] or 0.0), 2),
+                "low_stock_count": int(r["low_stock_count"] or 0),
+            }
+            for r in rows
+        ]
+
+    @staticmethod
+    def _parse_dt(val: Any) -> datetime | None:
+        if val is None:
+            return None
+        if isinstance(val, datetime):
+            return val
+        try:
+            return datetime.fromisoformat(str(val).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    def get_recent_transactions(self, limit: int = 10) -> list[dict[str, Any]]:
+        tables = self._existing_tables()
+        safe_limit = max(1, min(int(limit), 50))
+        events: list[dict[str, Any]] = []
+
+        if "sales" in tables:
+            has_customers = "customers" in tables
+            sale_sql = (
+                """
+                SELECT
+                    s.sale_id AS record_id,
+                    s.invoice_number AS reference_number,
+                    COALESCE(c.name, 'Walk-in Customer') AS counterparty,
+                    s.total_amount AS amount,
+                    s.status AS status,
+                    s.sale_date AS occurred_at
+                FROM sales s
+                LEFT JOIN customers c ON c.id = s.customer_id
+                ORDER BY s.sale_date DESC
+                LIMIT :limit
+                """
+                if has_customers
+                else """
+                SELECT
+                    s.sale_id AS record_id,
+                    s.invoice_number AS reference_number,
+                    'Walk-in Customer' AS counterparty,
+                    s.total_amount AS amount,
+                    s.status AS status,
+                    s.sale_date AS occurred_at
+                FROM sales s
+                ORDER BY s.sale_date DESC
+                LIMIT :limit
+                """
+            )
+            for row in self.db.execute(text(sale_sql), {"limit": safe_limit}).mappings().all():
+                events.append(
+                    {
+                        "transaction_type": "SALE",
+                        "record_id": int(row["record_id"]),
+                        "reference_number": str(row["reference_number"]),
+                        "counterparty": str(row["counterparty"]),
+                        "amount": round(float(row["amount"] or 0.0), 2),
+                        "quantity": None,
+                        "status": str(row["status"]),
+                        "occurred_at": self._parse_dt(row["occurred_at"]),
+                    }
+                )
+
+        if "purchases" in tables:
+            has_suppliers = "suppliers" in tables
+            purch_sql = (
+                """
+                SELECT
+                    pu.purchase_id AS record_id,
+                    COALESCE(pu.invoice_number, 'PO-' || CAST(pu.purchase_id AS CHAR)) AS reference_number,
+                    COALESCE(sup.supplier_name, 'Supplier') AS counterparty,
+                    pu.total_amount AS amount,
+                    pu.status AS status,
+                    pu.purchase_date AS occurred_at
+                FROM purchases pu
+                LEFT JOIN suppliers sup ON sup.supplier_id = pu.supplier_id
+                ORDER BY pu.purchase_date DESC
+                LIMIT :limit
+                """
+                if self.db.get_bind().dialect.name == "sqlite" and has_suppliers
+                else """
+                SELECT
+                    pu.purchase_id AS record_id,
+                    COALESCE(pu.invoice_number, CONCAT('PO-', pu.purchase_id)) AS reference_number,
+                    COALESCE(sup.supplier_name, 'Supplier') AS counterparty,
+                    pu.total_amount AS amount,
+                    pu.status AS status,
+                    pu.purchase_date AS occurred_at
+                FROM purchases pu
+                LEFT JOIN suppliers sup ON sup.supplier_id = pu.supplier_id
+                ORDER BY pu.purchase_date DESC
+                LIMIT :limit
+                """
+                if has_suppliers
+                else """
+                SELECT
+                    pu.purchase_id AS record_id,
+                    pu.invoice_number AS reference_number,
+                    'Supplier' AS counterparty,
+                    pu.total_amount AS amount,
+                    pu.status AS status,
+                    pu.purchase_date AS occurred_at
+                FROM purchases pu
+                ORDER BY pu.purchase_date DESC
+                LIMIT :limit
+                """
+            )
+            for row in self.db.execute(text(purch_sql), {"limit": safe_limit}).mappings().all():
+                events.append(
+                    {
+                        "transaction_type": "PURCHASE",
+                        "record_id": int(row["record_id"]),
+                        "reference_number": str(row["reference_number"] or f"PO-{row['record_id']}"),
+                        "counterparty": str(row["counterparty"]),
+                        "amount": round(float(row["amount"] or 0.0), 2),
+                        "quantity": None,
+                        "status": str(row["status"]),
+                        "occurred_at": self._parse_dt(row["occurred_at"]),
+                    }
+                )
+
+        events.sort(
+            key=lambda item: item["occurred_at"].timestamp() if item["occurred_at"] else 0.0,
+            reverse=True,
+        )
+        return events[:safe_limit]
