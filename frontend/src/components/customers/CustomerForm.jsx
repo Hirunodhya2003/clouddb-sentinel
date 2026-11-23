@@ -1,6 +1,11 @@
 import { useState } from "react";
 
-export default function CustomerForm({ initialCustomer, onSave, onCancel }) {
+export default function CustomerForm({
+  initialCustomer,
+  onSave,
+  onCancel,
+  saving = false,
+}) {
   const [form, setForm] = useState({
     name: initialCustomer?.name ?? "",
     email: initialCustomer?.email ?? "",
@@ -73,8 +78,8 @@ export default function CustomerForm({ initialCustomer, onSave, onCancel }) {
         <button type="button" className="secondary-button" onClick={onCancel}>
           Cancel
         </button>
-        <button type="submit" className="primary-button">
-          Save customer
+        <button type="submit" className="primary-button" disabled={saving}>
+          {saving ? "Saving..." : "Save customer"}
         </button>
       </div>
     </form>
