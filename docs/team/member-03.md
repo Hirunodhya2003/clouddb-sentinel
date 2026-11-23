@@ -19,20 +19,20 @@ Files: **38**. Tick when done.
 - [ ] `backend/tests/test_views_explorer.py`
 
 ## database
-- [ ] `database/adbms/advanced_queries/joins.sql`
-- [ ] `database/adbms/advanced_queries/nested_queries.sql`
-- [ ] `database/adbms/advanced_queries/subqueries.sql`
-- [ ] `database/adbms/functions/fn_check_variant_availability.sql`
-- [ ] `database/adbms/views/product_view.sql`
-- [ ] `database/adbms/views/variant_details_view.sql`
-- [ ] `database/modules/variants/01_create_sizes_table.sql`
-- [ ] `database/modules/variants/02_create_colors_table.sql`
-- [ ] `database/modules/variants/03_create_product_variants_table.sql`
-- [ ] `database/modules/variants/04_variant_constraints.sql`
-- [ ] `database/testing/test_views.sql`
+- [x] `database/adbms/advanced_queries/joins.sql`
+- [x] `database/adbms/advanced_queries/nested_queries.sql`
+- [x] `database/adbms/advanced_queries/subqueries.sql`
+- [x] `database/adbms/functions/fn_check_variant_availability.sql`
+- [x] `database/adbms/views/product_view.sql`
+- [x] `database/adbms/views/variant_details_view.sql`
+- [x] `database/modules/variants/01_create_sizes_table.sql`
+- [x] `database/modules/variants/02_create_colors_table.sql`
+- [x] `database/modules/variants/03_create_product_variants_table.sql`
+- [x] `database/modules/variants/04_variant_constraints.sql`
+- [x] `database/testing/test_views.sql`
 
 ## docs
-- [ ] `docs/adbms/views_and_advanced_queries.md`
+- [x] `docs/adbms/views_and_advanced_queries.md`
 
 ## frontend
 - [ ] `frontend/src/components/variants/ColorSelector.jsx`
