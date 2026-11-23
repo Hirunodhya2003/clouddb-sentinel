@@ -5,6 +5,9 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import MainLayout from "../layouts/MainLayout.jsx";
 import AuthLayout from "../layouts/AuthLayout.jsx";
 import ComingSoon from "../pages/shared/ComingSoon.jsx";
+import CategoryList from "../pages/categories/CategoryList.jsx";
+import CreateCategory from "../pages/categories/CreateCategory.jsx";
+import EditCategory from "../pages/categories/EditCategory.jsx";
 
 const soon = (title) => <ComingSoon title={title} />;
 
@@ -22,7 +25,9 @@ export default function AppRoutes() {
 
         {/* Member 02 */}
         <Route path="/products" element={soon("Products")} />
-        <Route path="/categories" element={soon("Categories")} />
+        <Route path="/categories" element={<CategoryList />} />
+        <Route path="/categories/new" element={<CreateCategory />} />
+        <Route path="/categories/:id/edit" element={<EditCategory />} />
         <Route path="/schema-viewer" element={soon("Schema viewer")} />
 
         {/* Other members: replace as pages are merged */}
