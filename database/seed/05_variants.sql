@@ -1,2 +1,6 @@
--- Owner: Member 06
--- TODO: write SQL
+-- CloudDB Sentinel
+-- Seed: Product variant data
+--
+-- No product variant records are inserted here.
+-- Actual product, size and colour information
+-- must be obtained from S.P. Apparel first.
