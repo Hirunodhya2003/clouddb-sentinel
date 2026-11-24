@@ -60,3 +60,52 @@ def get_sales_report(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/purchases", response_model=PurchaseReportResponse)
+def get_purchase_report(
+    start_date: Optional[str] = Query(default=None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(default=None, description="End date (YYYY-MM-DD)"),
+    status_filter: Optional[str] = Query(default=None, alias="status"),
+    supplier_id: Optional[int] = Query(default=None, gt=0),
+    search: Optional[str] = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    service: ReportService = Depends(get_report_service),
+) -> PurchaseReportResponse:
+    try:
+        return service.get_purchase_report(
+            start_date=start_date,
+            end_date=end_date,
+            status=status_filter,
+            supplier_id=supplier_id,
+            search=search,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/inventory", response_model=InventoryReportResponse)
+def get_inventory_report(
+    category_id: Optional[int] = Query(default=None, gt=0),
+    stock_status: Optional[str] = Query(default=None, description="IN_STOCK, LOW_STOCK, or OUT_OF_STOCK"),
+    search: Optional[str] = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=500),
+    service: ReportService = Depends(get_report_service),
+) -> InventoryReportResponse:
+    try:
+        return service.get_inventory_report(
+            category_id=category_id,
+            stock_status=stock_status,
+            search=search,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/business-summary", response_model=BusinessSummaryResponse)
+def get_business_summary(
+    service: ReportService = Depends(get_report_service),
+) -> BusinessSummaryResponse:
+    return service.get_business_summary()
