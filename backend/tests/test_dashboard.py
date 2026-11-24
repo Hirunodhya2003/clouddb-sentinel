@@ -157,3 +157,59 @@ def _seed_dashboard_schema(engine) -> None:
                 "VALUES (1, 1, 'SUP-901', '2026-11-19 08:00:00', 40000, 'RECEIVED')"
             )
         )
+
+
+@pytest.fixture
+def dashboard_client():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    _seed_dashboard_schema(engine)
+    TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    def override_get_db():
+        with TestingSession() as db:
+            yield db
+
+    app = FastAPI()
+    app.include_router(dashboard_ep.router, prefix="/api/v1")
+    app.dependency_overrides[dashboard_ep.get_db] = override_get_db
+    return TestClient(app)
+
+
+def test_dashboard_overview_returns_cards_charts_and_recent_activity(dashboard_client):
+    res = dashboard_client.get("/api/v1/dashboard")
+    assert res.status_code == 200
+    body = res.json()
+
+    cards = {c["key"]: c for c in body["summary_cards"]}
+    assert cards["gross_revenue"]["value"] == 10000.0
+    assert cards["purchase_spend"]["value"] == 40000.0
+    # 20 * 3500 + 3 * 1500 = 74,500
+    assert cards["inventory_valuation"]["value"] == 74500.0
+    assert cards["low_stock_alerts"]["value"] == 1.0
+
+    assert len(body["sales_chart"]) == 3
+    assert len(body["inventory_chart"]) == 2
+    assert body["inventory_chart"][0]["category_name"] == "Menswear"
+    assert body["inventory_chart"][0]["retail_value"] == 70000.0
+
+    assert len(body["recent_transactions"]) == 4
+    assert body["recent_transactions"][0]["reference_number"] == "INV-1003"
+
+
+def test_dashboard_individual_subendpoints(dashboard_client):
+    assert dashboard_client.get("/api/v1/dashboard/summary").status_code == 200
+    sales_res = dashboard_client.get("/api/v1/dashboard/sales-chart", params={"days": 7})
+    assert sales_res.status_code == 200
+    assert len(sales_res.json()) == 3
+
+    inv_res = dashboard_client.get("/api/v1/dashboard/inventory-chart")
+    assert inv_res.status_code == 200
+    assert inv_res.json()[1]["low_stock_count"] == 1
+
+    recent_res = dashboard_client.get("/api/v1/dashboard/recent-transactions", params={"limit": 2})
+    assert recent_res.status_code == 200
+    assert len(recent_res.json()) == 2
