@@ -128,3 +128,81 @@ def _seed_reports_db(engine) -> None:
                 "(2, 2, 102, 5, 3000, 15000)"
             )
         )
+
+
+@pytest.fixture
+def reports_client():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    _seed_reports_db(engine)
+    TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    def override_get_db():
+        with TestingSession() as db:
+            yield db
+
+    app = FastAPI()
+    app.include_router(reports_ep.router, prefix="/api/v1")
+    app.dependency_overrides[reports_ep.get_db] = override_get_db
+    return TestClient(app)
+
+
+def test_sales_report_filtering_and_summary(reports_client):
+    res = reports_client.get("/api/v1/reports/sales")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total"] == 2
+    assert data["summary"]["completed_orders"] == 1
+    assert data["summary"]["net_revenue"] == 7500.0
+    assert data["summary"]["total_units_sold"] == 3
+
+    filtered = reports_client.get("/api/v1/reports/sales", params={"status": "COMPLETED"})
+    assert filtered.status_code == 200
+    assert filtered.json()["total"] == 1
+
+    bad_range = reports_client.get(
+        "/api/v1/reports/sales",
+        params={"start_date": "2026-12-01", "end_date": "2026-11-01"},
+    )
+    assert bad_range.status_code == 400
+
+
+def test_purchase_report_and_supplier_filter(reports_client):
+    res = reports_client.get("/api/v1/reports/purchases")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["total"] == 2
+    assert body["summary"]["received_spend"] == 33000.0
+    assert body["summary"]["pending_commitment"] == 15000.0
+
+
+def test_inventory_report_is_readonly_and_classifies_stock_health(reports_client):
+    res = reports_client.get("/api/v1/reports/inventory")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["total"] == 3
+    assert body["summary"]["low_stock_variants"] == 1
+    assert body["summary"]["out_of_stock_variants"] == 1
+    assert body["summary"]["total_units_on_hand"] == 19
+
+    low = reports_client.get("/api/v1/reports/inventory", params={"stock_status": "LOW_STOCK"})
+    assert low.status_code == 200
+    assert low.json()["total"] == 1
+    assert low.json()["items"][0]["sku"] == "DN-01-L-BLK"
+
+    bad = reports_client.get("/api/v1/reports/inventory", params={"stock_status": "INVALID"})
+    assert bad.status_code == 400
+
+
+def test_business_summary_aggregates_kpis(reports_client):
+    res = reports_client.get("/api/v1/reports/business-summary")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["gross_sales_revenue"] == 7500.0
+    assert body["total_purchase_spend"] == 33000.0
+    assert body["estimated_net_cashflow"] == -25500.0
+    assert body["low_stock_variants_count"] == 1
+    assert body["out_of_stock_variants_count"] == 1
