@@ -28,16 +28,27 @@ import {
   getStockAdjustments,
   getSalesReturns,
 } from './stockMovementService.js';
+import {
+  IS_DEVELOPMENT_MOCK_MODE as _IS_DEV_MOCK_MODE,
+  m08FetchJson,
+} from './m08LiveApi.js';
 
-export const IS_DEVELOPMENT_MOCK_MODE = true;
+export const IS_DEVELOPMENT_MOCK_MODE = _IS_DEV_MOCK_MODE;
 
 export const AUDIT_REPORT_ENDPOINTS = Object.freeze({
   GET_AUDIT_REPORTS: '/api/v1/audit-reports',
   GET_STOCK_AUDIT_REPORTS: '/api/v1/audit-reports/stock',
 });
 
-export const AUDIT_SCHEMA_DEPENDENCY_NOTICE =
+export const AUDIT_MOCK_SCHEMA_DEPENDENCY_NOTICE =
   'Provisional Development Mock Mode: database/modules/auditing/01_create_audit_logs_table.sql (owned by Member 10) is currently a TODO stub. Audit records below are derived read-only from confirmed stock_movements, stock_adjustments, sales_returns, and trigger guard events.';
+
+export const AUDIT_LIVE_SCHEMA_DEPENDENCY_NOTICE =
+  "Live operational audit data from stock movements, stock adjustments, and sales returns. Member 10's audit_logs integration is still pending. These records are derived read-only from operational tables.";
+
+export const AUDIT_SCHEMA_DEPENDENCY_NOTICE = IS_DEVELOPMENT_MOCK_MODE
+  ? AUDIT_MOCK_SCHEMA_DEPENDENCY_NOTICE
+  : AUDIT_LIVE_SCHEMA_DEPENDENCY_NOTICE;
 
 export const AUDIT_ENTITY_TABLES = Object.freeze([
   'stock_movements',
@@ -290,70 +301,139 @@ async function buildAllAuditReportRecords() {
 export function computeAuditReportSummary(records = []) {
   const totalEvents = records.length;
   const stockLedgerEvents = records.filter(
-    (r) => r.entity_table === 'stock_movements'
+    (r) =>
+      r.entity_table === 'stock_movements' ||
+      r.source_table === 'stock_movements'
   ).length;
   const adjustmentAudits = records.filter(
-    (r) => r.entity_table === 'stock_adjustments'
+    (r) =>
+      r.entity_table === 'stock_adjustments' ||
+      r.source_table === 'stock_adjustments'
   ).length;
   const returnAudits = records.filter(
-    (r) => r.entity_table === 'sales_returns'
+    (r) =>
+      r.entity_table === 'sales_returns' || r.source_table === 'sales_returns'
   ).length;
   const needsReviewCount = records.filter(
     (r) =>
       r.outcome === 'PENDING_REVIEW' ||
+      r.outcome === 'NEEDS_REVIEW' ||
       r.outcome === 'REJECTED' ||
-      r.outcome === 'BLOCKED_45000'
+      r.outcome === 'BLOCKED_45000' ||
+      r.outcome === 'BLOCKED'
   ).length;
   const triggerGuardBlocks = records.filter(
-    (r) => r.action_type === 'TRIGGER_GUARD_BLOCK'
+    (r) => r.action_type === 'TRIGGER_GUARD_BLOCK' || r.outcome === 'BLOCKED'
   ).length;
 
-  // Build 10 chronological date/category buckets for the Figma UI 48 vertical bar chart
-  const dateBuckets = [
-    { key: '2026-11-10', label: '10 Nov' },
-    { key: '2026-11-11', label: '11 Nov' },
-    { key: '2026-11-12', label: '12 Nov' },
-    { key: '2026-11-13', label: '13 Nov' },
-    { key: '2026-11-14', label: '14 Nov' },
-    { key: '2026-11-15', label: '15 Nov' },
-    { key: '2026-11-16', label: '16 Nov' },
-    { key: '2026-11-17-AM', label: '17 Nov AM' },
-    { key: '2026-11-17-PM', label: '17 Nov PM' },
-    { key: 'TRIGGERS', label: 'Guards' },
-  ];
+  let chartSeries = [];
 
-  const chartSeries = dateBuckets.map((bucket) => {
-    let count = 0;
-    if (bucket.key === 'TRIGGERS') {
-      count = records.filter(
-        (r) => r.action_type === 'TRIGGER_GUARD_BLOCK'
-      ).length;
-    } else if (bucket.key === '2026-11-17-AM') {
-      count = records.filter((r) => {
-        const ts = r.event_timestamp || '';
-        if (!ts.startsWith('2026-11-17')) return false;
-        const hour = Number(ts.slice(11, 13)) || 0;
-        return hour < 14;
-      }).length;
-    } else if (bucket.key === '2026-11-17-PM') {
-      count = records.filter((r) => {
-        const ts = r.event_timestamp || '';
-        if (!ts.startsWith('2026-11-17')) return false;
-        const hour = Number(ts.slice(11, 13)) || 0;
-        return hour >= 14;
-      }).length;
-    } else {
-      count = records.filter((r) =>
-        (r.event_timestamp || '').startsWith(bucket.key)
-      ).length;
+  if (!IS_DEVELOPMENT_MOCK_MODE) {
+    const monthAbbrs = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+
+    const parsedDates = records
+      .map((r) => new Date(r.event_timestamp))
+      .filter((d) => !Number.isNaN(d.getTime()));
+
+    const anchorDate =
+      parsedDates.length > 0
+        ? new Date(Math.max(...parsedDates.map((d) => d.getTime())))
+        : new Date();
+
+    const anchorYear = anchorDate.getUTCFullYear();
+    const anchorMonth = anchorDate.getUTCMonth() + 1;
+    const anchorTotalMonths = anchorYear * 12 + (anchorMonth - 1);
+
+    const windowMonths = [];
+    for (let offset = 9; offset >= 0; offset -= 1) {
+      const totalM = anchorTotalMonths - offset;
+      const year = Math.floor(totalM / 12);
+      const month = (totalM % 12) + 1;
+      const key = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}`;
+      windowMonths.push({
+        key,
+        label: monthAbbrs[month - 1],
+        year,
+        month,
+        count: 0,
+      });
     }
 
-    return {
-      key: bucket.key,
-      label: bucket.label,
+    for (const d of parsedDates) {
+      const y = d.getUTCFullYear();
+      const m = d.getUTCMonth() + 1;
+      const bucket = windowMonths.find((b) => b.year === y && b.month === m);
+      if (bucket) {
+        bucket.count += 1;
+      }
+    }
+
+    chartSeries = windowMonths.map(({ key, label, count }) => ({
+      key,
+      label,
       count,
-    };
-  });
+    }));
+  } else {
+    // Build 10 chronological date/category buckets for the Figma UI 48 vertical bar chart in mock mode
+    const dateBuckets = [
+      { key: '2026-11-10', label: '10 Nov' },
+      { key: '2026-11-11', label: '11 Nov' },
+      { key: '2026-11-12', label: '12 Nov' },
+      { key: '2026-11-13', label: '13 Nov' },
+      { key: '2026-11-14', label: '14 Nov' },
+      { key: '2026-11-15', label: '15 Nov' },
+      { key: '2026-11-16', label: '16 Nov' },
+      { key: '2026-11-17-AM', label: '17 Nov AM' },
+      { key: '2026-11-17-PM', label: '17 Nov PM' },
+      { key: 'TRIGGERS', label: 'Guards' },
+    ];
+
+    chartSeries = dateBuckets.map((bucket) => {
+      let count = 0;
+      if (bucket.key === 'TRIGGERS') {
+        count = records.filter(
+          (r) => r.action_type === 'TRIGGER_GUARD_BLOCK'
+        ).length;
+      } else if (bucket.key === '2026-11-17-AM') {
+        count = records.filter((r) => {
+          const ts = r.event_timestamp || '';
+          if (!ts.startsWith('2026-11-17')) return false;
+          const hour = Number(ts.slice(11, 13)) || 0;
+          return hour < 14;
+        }).length;
+      } else if (bucket.key === '2026-11-17-PM') {
+        count = records.filter((r) => {
+          const ts = r.event_timestamp || '';
+          if (!ts.startsWith('2026-11-17')) return false;
+          const hour = Number(ts.slice(11, 13)) || 0;
+          return hour >= 14;
+        }).length;
+      } else {
+        count = records.filter((r) =>
+          (r.event_timestamp || '').startsWith(bucket.key)
+        ).length;
+      }
+
+      return {
+        key: bucket.key,
+        label: bucket.label,
+        count,
+      };
+    });
+  }
 
   const maxBucketCount = Math.max(1, ...chartSeries.map((b) => b.count));
   const normalizedChartSeries = chartSeries.map((b) => ({
@@ -375,6 +455,21 @@ export function computeAuditReportSummary(records = []) {
   };
 }
 
+function normalizeLiveAuditItem(item) {
+  return {
+    ...item,
+    entity_table: item.entity_table || item.source_table || 'stock_movements',
+    source_table: item.source_table || item.entity_table || 'stock_movements',
+    actor: item.actor || {
+      user_id: null,
+      employee_code: 'SYS',
+      username: 'system_ledger',
+      full_name: 'CloudDB Ledger Engine',
+      role_name: 'SYSTEM',
+    },
+  };
+}
+
 /**
  * Fetch general & stock audit reports.
  * Maps to assignment endpoint: GET /api/v1/audit-reports
@@ -383,15 +478,25 @@ export function computeAuditReportSummary(records = []) {
  * @param {boolean} [options.simulateError=false]
  */
 export async function getAuditReports(options = {}) {
-  const { simulateError = false } = options;
+  const {
+    simulateError = false,
+    search,
+    source_table,
+    action_type,
+    outcome,
+    actor_user_id,
+    variant_id,
+    from_date,
+    to_date,
+  } = options;
+
+  if (simulateError) {
+    throw new Error(
+      'Simulated error while loading audit report records.'
+    );
+  }
 
   if (IS_DEVELOPMENT_MOCK_MODE) {
-    if (simulateError) {
-      throw new Error(
-        'Simulated error while loading development mock audit report records.'
-      );
-    }
-
     const items = await buildAllAuditReportRecords();
     return {
       items,
@@ -403,9 +508,35 @@ export async function getAuditReports(options = {}) {
     };
   }
 
-  throw new Error(
-    `Backend API integration (${AUDIT_REPORT_ENDPOINTS.GET_AUDIT_REPORTS}) requires frontend/src/services/api.js (Member 02), Member 10's audit_logs table, and FastAPI backend.`
-  );
+  const data = await m08FetchJson(AUDIT_REPORT_ENDPOINTS.GET_AUDIT_REPORTS, {
+    method: 'GET',
+    query: {
+      search,
+      source_table,
+      action_type,
+      outcome,
+      actor_user_id,
+      variant_id,
+      from_date,
+      to_date,
+    },
+  });
+  const rawItems = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.items)
+      ? data.items
+      : [];
+  const items = rawItems.map(normalizeLiveAuditItem);
+
+  return {
+    items,
+    total: typeof data?.total === 'number' ? data.total : items.length,
+    summary: data?.summary || computeAuditReportSummary(items),
+    isMockMode: false,
+    endpoint: AUDIT_REPORT_ENDPOINTS.GET_AUDIT_REPORTS,
+    auditLogsTableAvailable: Boolean(data?.audit_logs_table_available),
+    schemaDependencyNotice: AUDIT_LIVE_SCHEMA_DEPENDENCY_NOTICE,
+  };
 }
 
 /**
@@ -416,15 +547,25 @@ export async function getAuditReports(options = {}) {
  * @param {boolean} [options.simulateError=false]
  */
 export async function getStockAuditReports(options = {}) {
-  const { simulateError = false } = options;
+  const {
+    simulateError = false,
+    search,
+    source_table,
+    action_type,
+    outcome,
+    actor_user_id,
+    variant_id,
+    from_date,
+    to_date,
+  } = options;
+
+  if (simulateError) {
+    throw new Error(
+      'Simulated error while loading stock audit report records.'
+    );
+  }
 
   if (IS_DEVELOPMENT_MOCK_MODE) {
-    if (simulateError) {
-      throw new Error(
-        'Simulated error while loading development mock stock audit report records.'
-      );
-    }
-
     const allItems = await buildAllAuditReportRecords();
     const stockItems = allItems.filter((item) => item.is_stock_audit);
 
@@ -438,9 +579,38 @@ export async function getStockAuditReports(options = {}) {
     };
   }
 
-  throw new Error(
-    `Backend API integration (${AUDIT_REPORT_ENDPOINTS.GET_STOCK_AUDIT_REPORTS}) requires frontend/src/services/api.js (Member 02), Member 10's audit_logs table, and FastAPI backend.`
+  const data = await m08FetchJson(
+    AUDIT_REPORT_ENDPOINTS.GET_STOCK_AUDIT_REPORTS,
+    {
+      method: 'GET',
+      query: {
+        search,
+        source_table,
+        action_type,
+        outcome,
+        actor_user_id,
+        variant_id,
+        from_date,
+        to_date,
+      },
+    }
   );
+  const rawItems = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.items)
+      ? data.items
+      : [];
+  const items = rawItems.map(normalizeLiveAuditItem);
+
+  return {
+    items,
+    total: typeof data?.total === 'number' ? data.total : items.length,
+    summary: data?.summary || computeAuditReportSummary(items),
+    isMockMode: false,
+    endpoint: AUDIT_REPORT_ENDPOINTS.GET_STOCK_AUDIT_REPORTS,
+    auditLogsTableAvailable: Boolean(data?.audit_logs_table_available),
+    schemaDependencyNotice: AUDIT_LIVE_SCHEMA_DEPENDENCY_NOTICE,
+  };
 }
 
 export default {

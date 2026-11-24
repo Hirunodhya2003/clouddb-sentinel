@@ -4,13 +4,18 @@
 //   - GET /api/v1/stock-movements
 //   - GET /api/v1/stock-movements/{id}
 //
-// DEVELOPMENT-ONLY MOCK MODE:
-// The shared FastAPI backend and frontend/src/services/api.js are not implemented yet.
-// While IS_DEVELOPMENT_MOCK_MODE is true, this service returns deterministic local mock
-// records that strictly conform to database/modules/stock_movements/01_create_stock_movements_table.sql
-// without making network requests.
+// DEVELOPMENT-ONLY MOCK MODE (default) WITH OPTIONAL LIVE API MODE:
+// By default, IS_DEVELOPMENT_MOCK_MODE is true and this service returns deterministic
+// local mock records without making network requests.
+// When VITE_M08_LIVE_API=true, this service connects directly to the local FastAPI
+// server at http://127.0.0.1:8018 via fetch (m08LiveApi.js).
 
-export const IS_DEVELOPMENT_MOCK_MODE = true;
+import {
+  IS_DEVELOPMENT_MOCK_MODE as _IS_DEV_MOCK_MODE,
+  m08FetchJson,
+} from './m08LiveApi.js';
+
+export const IS_DEVELOPMENT_MOCK_MODE = _IS_DEV_MOCK_MODE;
 
 export const API_ENDPOINTS = Object.freeze({
   LIST_STOCK_MOVEMENTS: '/api/v1/stock-movements',
@@ -19,8 +24,13 @@ export const API_ENDPOINTS = Object.freeze({
   CREATE_STOCK_ADJUSTMENT: '/api/v1/stock-adjustments',
   GET_STOCK_ADJUSTMENT_BY_ID: (adjustmentId) =>
     `/api/v1/stock-adjustments/${adjustmentId}`,
+  LIST_ADJUSTMENT_PRODUCT_VARIANTS:
+    '/api/v1/stock-adjustments/product-variants',
   LIST_RETURNS: '/api/v1/returns',
   CREATE_RETURN: '/api/v1/returns',
+  LIST_ELIGIBLE_RETURN_SALES: '/api/v1/returns/eligible-sales',
+  LIST_ELIGIBLE_RETURN_SALE_ITEMS: (saleId) =>
+    `/api/v1/returns/eligible-sales/${saleId}/items`,
 });
 
 /**
@@ -418,15 +428,23 @@ export function enrichStockMovement(record) {
  * @returns {Promise<{ items: Array, total: number, isMockMode: boolean, endpoint: string }>}
  */
 export async function getStockMovements(options = {}) {
-  const { simulateError = false } = options;
+  const {
+    simulateError = false,
+    search,
+    movement_type,
+    variant_id,
+    reference_type,
+    from_date,
+    to_date,
+  } = options;
+
+  if (simulateError) {
+    throw new Error(
+      'Simulated error while reading stock movements dataset.'
+    );
+  }
 
   if (IS_DEVELOPMENT_MOCK_MODE) {
-    if (simulateError) {
-      throw new Error(
-        'Simulated error while reading local development mock stock movements dataset.'
-      );
-    }
-
     const items = MOCK_STOCK_MOVEMENTS.map(enrichStockMovement);
     return {
       items,
@@ -436,9 +454,30 @@ export async function getStockMovements(options = {}) {
     };
   }
 
-  throw new Error(
-    `Backend API integration (${API_ENDPOINTS.LIST_STOCK_MOVEMENTS}) requires frontend/src/services/api.js (Member 02) and FastAPI backend.`
-  );
+  const data = await m08FetchJson(API_ENDPOINTS.LIST_STOCK_MOVEMENTS, {
+    method: 'GET',
+    query: {
+      search,
+      movement_type,
+      variant_id,
+      reference_type,
+      from_date,
+      to_date,
+    },
+  });
+  const rawList = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.items)
+      ? data.items
+      : [];
+  const items = rawList.map(enrichStockMovement);
+
+  return {
+    items,
+    total: items.length,
+    isMockMode: false,
+    endpoint: API_ENDPOINTS.LIST_STOCK_MOVEMENTS,
+  };
 }
 
 /**
@@ -450,6 +489,7 @@ export async function getStockMovements(options = {}) {
  */
 export async function getStockMovementById(movementId) {
   const numericId = Number(movementId);
+  const endpoint = API_ENDPOINTS.GET_STOCK_MOVEMENT_BY_ID(numericId);
 
   if (IS_DEVELOPMENT_MOCK_MODE) {
     const found = MOCK_STOCK_MOVEMENTS.find(
@@ -463,13 +503,18 @@ export async function getStockMovementById(movementId) {
     return {
       item: enrichStockMovement(found),
       isMockMode: true,
-      endpoint: API_ENDPOINTS.GET_STOCK_MOVEMENT_BY_ID(numericId),
+      endpoint,
     };
   }
 
-  throw new Error(
-    `Backend API integration (${API_ENDPOINTS.GET_STOCK_MOVEMENT_BY_ID(numericId)}) requires frontend/src/services/api.js (Member 02) and FastAPI backend.`
-  );
+  const data = await m08FetchJson(endpoint, { method: 'GET' });
+  const rawItem = data && data.item ? data.item : data;
+
+  return {
+    item: enrichStockMovement(rawItem),
+    isMockMode: false,
+    endpoint,
+  };
 }
 
 // ============================================================================
@@ -944,11 +989,15 @@ export function enrichStockAdjustment(adjustment) {
       quantity_after: qtyAfter,
       quantity_difference: quantityDifference,
       item_reason: item.item_reason || null,
-      sku: variant.sku || `VAR-${item.variant_id}`,
-      product_name: variant.product_name || `Product Variant #${item.variant_id}`,
-      category_name: variant.category_name || typeMeta.categoryLabel,
-      size_name: variant.size_name || '—',
-      colour_name: variant.colour_name || '—',
+      sku: item.sku || variant.sku || `VAR-${item.variant_id}`,
+      product_name:
+        item.product_name ||
+        variant.product_name ||
+        `Product Variant #${item.variant_id}`,
+      category_name:
+        item.category_name || variant.category_name || typeMeta.categoryLabel,
+      size_name: item.size_name || variant.size_name || '—',
+      colour_name: item.colour_name || variant.colour_name || '—',
     };
   });
 
@@ -972,15 +1021,69 @@ export function enrichStockAdjustment(adjustment) {
   };
 }
 
-/**
- * Returns mock product variants for variant selector inputs.
- */
-export async function getMockProductVariants() {
+function normalizeLiveProductVariant(variant) {
+  const variantId = Number(variant.variant_id);
+  const currentQty =
+    variant.current_quantity_on_hand !== undefined &&
+    variant.current_quantity_on_hand !== null
+      ? Number(variant.current_quantity_on_hand)
+      : variant.quantity_on_hand !== undefined &&
+          variant.quantity_on_hand !== null
+        ? Number(variant.quantity_on_hand)
+        : 0;
+
   return {
-    items: [...MOCK_PRODUCT_VARIANTS],
-    isMockMode: IS_DEVELOPMENT_MOCK_MODE,
+    variant_id: variantId,
+    sku: variant.sku || `VAR-${variantId}`,
+    product_name: variant.product_name || `Product Variant #${variantId}`,
+    category_name: variant.category_name || 'Apparel / Retail',
+    size_name: variant.size_name || '—',
+    colour_name: variant.colour_name || '—',
+    current_quantity_on_hand: Number.isNaN(currentQty) ? 0 : currentQty,
+    reorder_level:
+      variant.reorder_level !== undefined && variant.reorder_level !== null
+        ? Number(variant.reorder_level)
+        : 10,
   };
 }
+
+/**
+ * Returns product variants with their current inventory `quantity_on_hand`
+ * for the Create Stock Adjustment form (Figma UI 19).
+ *
+ * - In default mock mode (`IS_DEVELOPMENT_MOCK_MODE === true`), returns `MOCK_PRODUCT_VARIANTS`.
+ * - In LIVE API mode (`VITE_M08_LIVE_API=true`), fetches real product variants from MySQL via
+ *   `GET /api/v1/stock-adjustments/product-variants` without falling back to mock data.
+ */
+export async function getMockProductVariants() {
+  if (IS_DEVELOPMENT_MOCK_MODE) {
+    return {
+      items: [...MOCK_PRODUCT_VARIANTS],
+      isMockMode: true,
+      endpoint: API_ENDPOINTS.LIST_ADJUSTMENT_PRODUCT_VARIANTS,
+    };
+  }
+
+  const data = await m08FetchJson(
+    API_ENDPOINTS.LIST_ADJUSTMENT_PRODUCT_VARIANTS,
+    { method: 'GET' }
+  );
+  const rawList = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.items)
+      ? data.items
+      : [];
+  const items = rawList.map(normalizeLiveProductVariant);
+
+  return {
+    items,
+    total: items.length,
+    isMockMode: false,
+    endpoint: API_ENDPOINTS.LIST_ADJUSTMENT_PRODUCT_VARIANTS,
+  };
+}
+
+export const getProductVariantsForAdjustments = getMockProductVariants;
 
 /**
  * Fetch list of stock adjustments.
@@ -991,15 +1094,22 @@ export async function getMockProductVariants() {
  * @returns {Promise<{ items: Array, total: number, isMockMode: boolean, endpoint: string }>}
  */
 export async function getStockAdjustments(options = {}) {
-  const { simulateError = false } = options;
+  const {
+    simulateError = false,
+    search,
+    status,
+    adjustment_type,
+    from_date,
+    to_date,
+  } = options;
+
+  if (simulateError) {
+    throw new Error(
+      'Simulated error while reading stock adjustments dataset.'
+    );
+  }
 
   if (IS_DEVELOPMENT_MOCK_MODE) {
-    if (simulateError) {
-      throw new Error(
-        'Simulated error while reading local development mock stock adjustments dataset.'
-      );
-    }
-
     const items = mockStockAdjustmentsStore.map(enrichStockAdjustment);
     return {
       items,
@@ -1009,9 +1119,29 @@ export async function getStockAdjustments(options = {}) {
     };
   }
 
-  throw new Error(
-    `Backend API integration (${API_ENDPOINTS.LIST_STOCK_ADJUSTMENTS}) requires frontend/src/services/api.js (Member 02) and FastAPI backend.`
-  );
+  const data = await m08FetchJson(API_ENDPOINTS.LIST_STOCK_ADJUSTMENTS, {
+    method: 'GET',
+    query: {
+      search,
+      status,
+      adjustment_type,
+      from_date,
+      to_date,
+    },
+  });
+  const rawList = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.items)
+      ? data.items
+      : [];
+  const items = rawList.map(enrichStockAdjustment);
+
+  return {
+    items,
+    total: items.length,
+    isMockMode: false,
+    endpoint: API_ENDPOINTS.LIST_STOCK_ADJUSTMENTS,
+  };
 }
 
 /**
@@ -1023,6 +1153,7 @@ export async function getStockAdjustments(options = {}) {
  */
 export async function getStockAdjustmentById(adjustmentId) {
   const numericId = Number(adjustmentId);
+  const endpoint = API_ENDPOINTS.GET_STOCK_ADJUSTMENT_BY_ID(numericId);
 
   if (IS_DEVELOPMENT_MOCK_MODE) {
     const found = mockStockAdjustmentsStore.find(
@@ -1036,13 +1167,18 @@ export async function getStockAdjustmentById(adjustmentId) {
     return {
       item: enrichStockAdjustment(found),
       isMockMode: true,
-      endpoint: API_ENDPOINTS.GET_STOCK_ADJUSTMENT_BY_ID(numericId),
+      endpoint,
     };
   }
 
-  throw new Error(
-    `Backend API integration (${API_ENDPOINTS.GET_STOCK_ADJUSTMENT_BY_ID(numericId)}) requires frontend/src/services/api.js (Member 02) and FastAPI backend.`
-  );
+  const data = await m08FetchJson(endpoint, { method: 'GET' });
+  const rawItem = data && data.item ? data.item : data;
+
+  return {
+    item: enrichStockAdjustment(rawItem),
+    isMockMode: false,
+    endpoint,
+  };
 }
 
 /**
@@ -1073,14 +1209,16 @@ export async function createStockAdjustment(payload) {
     throw new Error('Adjustment reference cannot exceed 50 characters.');
   }
 
-  const duplicateReference = mockStockAdjustmentsStore.some(
-    (adj) =>
-      adj.adjustment_reference.toLowerCase() === trimmedReference.toLowerCase()
-  );
-  if (duplicateReference) {
-    throw new Error(
-      `Adjustment reference "${trimmedReference}" already exists (uq_adjustment_reference).`
+  if (IS_DEVELOPMENT_MOCK_MODE) {
+    const duplicateReference = mockStockAdjustmentsStore.some(
+      (adj) =>
+        adj.adjustment_reference.toLowerCase() === trimmedReference.toLowerCase()
     );
+    if (duplicateReference) {
+      throw new Error(
+        `Adjustment reference "${trimmedReference}" already exists (uq_adjustment_reference).`
+      );
+    }
   }
 
   const adjustmentType = String(payload.adjustment_type ?? '').trim();
@@ -1217,9 +1355,40 @@ export async function createStockAdjustment(payload) {
     };
   }
 
-  throw new Error(
-    `Backend API integration (${API_ENDPOINTS.CREATE_STOCK_ADJUSTMENT}) requires frontend/src/services/api.js (Member 02) and FastAPI backend.`
-  );
+  const hasExplicitCreator =
+    payload.created_by !== undefined &&
+    payload.created_by !== null &&
+    payload.created_by !== '';
+
+  const apiPayload = {
+    adjustment_reference: trimmedReference,
+    adjustment_type: adjustmentType,
+    reason: trimmedReason,
+    ...(payload.adjustment_date
+      ? { adjustment_date: new Date(payload.adjustment_date).toISOString() }
+      : {}),
+    created_by: hasExplicitCreator ? Number(payload.created_by) : null,
+    items: validatedItems.map((item) => ({
+      variant_id: item.variant_id,
+      quantity_before: item.quantity_before,
+      quantity_after: item.quantity_after,
+      ...(item.item_reason ? { item_reason: item.item_reason } : {}),
+    })),
+  };
+
+  const created = await m08FetchJson(API_ENDPOINTS.CREATE_STOCK_ADJUSTMENT, {
+    method: 'POST',
+    body: apiPayload,
+  });
+  const rawCreated = created && created.item ? created.item : created;
+
+  return {
+    item: enrichStockAdjustment(rawCreated),
+    isMockMode: false,
+    endpoint: API_ENDPOINTS.CREATE_STOCK_ADJUSTMENT,
+    notice:
+      'Saved to database in PENDING status via POST /api/v1/stock-adjustments. Inventory quantity remains unchanged until sp_update_inventory completion.',
+  };
 }
 
 // ============================================================================
@@ -1707,15 +1876,18 @@ export function enrichSalesReturn(returnRecord) {
       sale_item_id: Number(item.sale_item_id),
       variant_id: variantId,
       quantity: qty,
-      quantity_sold: saleItem?.quantity ?? null,
+      quantity_sold: item.quantity_sold ?? saleItem?.quantity ?? null,
       refund_unit_price: unitPrice,
       refund_subtotal: refundSubtotal,
-      sku: variant.sku || `VAR-${variantId || item.sale_item_id}`,
+      sku: item.sku || variant.sku || `VAR-${variantId || item.sale_item_id}`,
       product_name:
-        variant.product_name || `Sale Item #${item.sale_item_id}`,
-      category_name: variant.category_name || 'Apparel / Retail',
-      size_name: variant.size_name || '—',
-      colour_name: variant.colour_name || '—',
+        item.product_name ||
+        variant.product_name ||
+        `Sale Item #${item.sale_item_id}`,
+      category_name:
+        item.category_name || variant.category_name || 'Apparel / Retail',
+      size_name: item.size_name || variant.size_name || '—',
+      colour_name: item.colour_name || variant.colour_name || '—',
     };
   });
 
@@ -1738,8 +1910,12 @@ export function enrichSalesReturn(returnRecord) {
         : computedTotalRefund,
     return_code: `RET-${returnRecord.return_id}`,
     sale_code: `SAL-${returnRecord.sale_id}`,
-    invoice_number: sale?.invoice_number || `INV-${returnRecord.sale_id}`,
-    customer_name: sale?.customer_name || 'Retail Customer',
+    invoice_number:
+      returnRecord.invoice_number ||
+      sale?.invoice_number ||
+      `INV-${returnRecord.sale_id}`,
+    customer_name:
+      returnRecord.customer_name || sale?.customer_name || 'Retail Customer',
     sale_label: sale?.sale_label || 'Retail purchase',
     category_label: primaryItem?.category_name || 'Apparel / Retail',
     status_label: statusMeta.label,
@@ -1751,14 +1927,141 @@ export function enrichSalesReturn(returnRecord) {
   };
 }
 
+function normalizeLiveReturnSaleItem(item, fallbackSaleId = null) {
+  const qty = Number(item.quantity) || 0;
+  const unitPrice = Number(item.unit_price) || 0;
+  const prevReturned = Number(item.previously_returned_quantity) || 0;
+  const remainingEligible =
+    item.remaining_eligible_quantity !== undefined &&
+    item.remaining_eligible_quantity !== null
+      ? Number(item.remaining_eligible_quantity)
+      : Math.max(0, qty - prevReturned);
+
+  return {
+    sale_item_id: Number(item.sale_item_id),
+    sale_id: Number(item.sale_id ?? fallbackSaleId),
+    variant_id: Number(item.variant_id),
+    sku: item.sku || `VAR-${item.variant_id}`,
+    product_name: item.product_name || `Product Variant #${item.variant_id}`,
+    category_name: item.category_name || 'Apparel / Retail',
+    size_name: item.size_name || '—',
+    colour_name: item.colour_name || '—',
+    quantity: qty,
+    unit_price: unitPrice,
+    subtotal:
+      typeof item.subtotal === 'number'
+        ? Number(item.subtotal.toFixed(2))
+        : Number((qty * unitPrice).toFixed(2)),
+    previously_returned_quantity: prevReturned,
+    remaining_eligible_quantity: remainingEligible,
+  };
+}
+
+function normalizeLiveReturnSale(sale) {
+  const saleId = Number(sale.sale_id);
+  const rawItems = Array.isArray(sale.items) ? sale.items : [];
+  const items = rawItems.map((item) => normalizeLiveReturnSaleItem(item, saleId));
+
+  return {
+    sale_id: saleId,
+    sale_code: sale.sale_code || `SAL-${saleId}`,
+    customer_id:
+      sale.customer_id !== undefined && sale.customer_id !== null
+        ? Number(sale.customer_id)
+        : null,
+    customer_name: sale.customer_name || 'Retail Customer',
+    invoice_number: sale.invoice_number || `INV-${saleId}`,
+    sale_date: sale.sale_date,
+    total_amount: Number(sale.total_amount) || 0,
+    status: sale.status || 'COMPLETED',
+    sale_label:
+      sale.sale_label ||
+      (items.length > 1 ? 'Multi-item order' : 'Retail purchase'),
+    items,
+  };
+}
+
 /**
- * Returns mock completed sales with their sale_items and remaining eligible return quantities.
- * Development-only helper for the Create Return form (Figma UI 21).
+ * Returns COMPLETED sales with their sale_items and remaining eligible return quantities
+ * for the Create Return form (Figma UI 21).
+ *
+ * - In default mock mode (`IS_DEVELOPMENT_MOCK_MODE === true`), returns local `MOCK_SALES`.
+ * - In LIVE API mode (`VITE_M08_LIVE_API=true`), fetches real COMPLETED sales and their
+ *   actual line items from `GET /api/v1/returns/eligible-sales` without falling back to mock data.
  */
 export async function getMockSalesForReturns() {
+  if (IS_DEVELOPMENT_MOCK_MODE) {
+    return {
+      items: getEnrichedMockSales(),
+      isMockMode: true,
+      endpoint: API_ENDPOINTS.LIST_ELIGIBLE_RETURN_SALES,
+    };
+  }
+
+  const data = await m08FetchJson(API_ENDPOINTS.LIST_ELIGIBLE_RETURN_SALES, {
+    method: 'GET',
+  });
+  const rawList = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.items)
+      ? data.items
+      : [];
+  const items = rawList.map(normalizeLiveReturnSale);
+
   return {
-    items: getEnrichedMockSales(),
-    isMockMode: IS_DEVELOPMENT_MOCK_MODE,
+    items,
+    total: items.length,
+    isMockMode: false,
+    endpoint: API_ENDPOINTS.LIST_ELIGIBLE_RETURN_SALES,
+  };
+}
+
+export const getSalesForReturns = getMockSalesForReturns;
+
+/**
+ * Fetches return-eligible sale line items for a specific COMPLETED sale (`sale_id`).
+ *
+ * - In default mock mode, looks up the sale in `getEnrichedMockSales()`.
+ * - In LIVE API mode (`VITE_M08_LIVE_API=true`), queries
+ *   `GET /api/v1/returns/eligible-sales/{sale_id}/items` without falling back to mock data.
+ */
+export async function getSaleItemsForReturn(saleId) {
+  const numericSaleId = Number(saleId);
+  const endpoint = API_ENDPOINTS.LIST_ELIGIBLE_RETURN_SALE_ITEMS(numericSaleId);
+
+  if (!Number.isInteger(numericSaleId) || numericSaleId <= 0) {
+    throw new Error('A valid sale_id is required to load sale line items.');
+  }
+
+  if (IS_DEVELOPMENT_MOCK_MODE) {
+    const matchedSale = getEnrichedMockSales().find(
+      (s) => s.sale_id === numericSaleId
+    );
+    if (!matchedSale) {
+      throw new Error(`Original sale #${saleId} does not exist.`);
+    }
+    return {
+      items: matchedSale.items || [],
+      isMockMode: true,
+      endpoint,
+    };
+  }
+
+  const data = await m08FetchJson(endpoint, { method: 'GET' });
+  const rawList = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.items)
+      ? data.items
+      : [];
+  const items = rawList.map((item) =>
+    normalizeLiveReturnSaleItem(item, numericSaleId)
+  );
+
+  return {
+    items,
+    total: items.length,
+    isMockMode: false,
+    endpoint,
   };
 }
 
@@ -1771,15 +2074,22 @@ export async function getMockSalesForReturns() {
  * @returns {Promise<{ items: Array, total: number, isMockMode: boolean, endpoint: string }>}
  */
 export async function getSalesReturns(options = {}) {
-  const { simulateError = false } = options;
+  const {
+    simulateError = false,
+    search,
+    return_status,
+    sale_id,
+    from_date,
+    to_date,
+  } = options;
+
+  if (simulateError) {
+    throw new Error(
+      'Simulated error while reading sales returns dataset.'
+    );
+  }
 
   if (IS_DEVELOPMENT_MOCK_MODE) {
-    if (simulateError) {
-      throw new Error(
-        'Simulated error while reading local development mock sales returns dataset.'
-      );
-    }
-
     const items = mockSalesReturnsStore.map(enrichSalesReturn);
     return {
       items,
@@ -1789,15 +2099,35 @@ export async function getSalesReturns(options = {}) {
     };
   }
 
-  throw new Error(
-    `Backend API integration (${API_ENDPOINTS.LIST_RETURNS}) requires frontend/src/services/api.js (Member 02) and FastAPI backend.`
-  );
+  const data = await m08FetchJson(API_ENDPOINTS.LIST_RETURNS, {
+    method: 'GET',
+    query: {
+      search,
+      return_status,
+      sale_id,
+      from_date,
+      to_date,
+    },
+  });
+  const rawList = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.items)
+      ? data.items
+      : [];
+  const items = rawList.map(enrichSalesReturn);
+
+  return {
+    items,
+    total: items.length,
+    isMockMode: false,
+    endpoint: API_ENDPOINTS.LIST_RETURNS,
+  };
 }
 
 /**
- * Development-only detail lookup helper for the UI modal.
+ * Detail lookup helper for the UI modal.
  * Note: The assignment specification defines GET /api/v1/returns and POST /api/v1/returns,
- * so this helper looks up the return from the local dataset without inventing an unapproved endpoint.
+ * so this helper looks up the return from the dataset without inventing an unapproved endpoint.
  *
  * @param {number|string} returnId
  * @returns {Promise<{ item: Object, isMockMode: boolean }>}
@@ -1820,25 +2150,23 @@ export async function getSalesReturnByIdDevOnly(returnId) {
     };
   }
 
-  throw new Error(
-    `Backend API integration (${API_ENDPOINTS.LIST_RETURNS}) requires frontend/src/services/api.js (Member 02) and FastAPI backend.`
+  const listResponse = await getSalesReturns();
+  const found = (listResponse.items || []).find(
+    (ret) => Number(ret.return_id) === numericId
   );
+  if (!found) {
+    throw new Error(`Sales return record #${returnId} was not found.`);
+  }
+
+  return {
+    item: found,
+    isMockMode: false,
+  };
 }
 
 /**
- * Submit a new sales return in development mock mode.
+ * Submit a new sales return.
  * Maps to assignment endpoint: POST /api/v1/returns
- *
- * Enforces SQL schema constraints:
- *   - sale_id: must reference a valid existing sale in sales
- *   - return_reason: required non-empty string <= 255 chars (chk_return_reason_not_empty)
- *   - return_status: always initialized as 'PENDING'
- *   - items: at least 1 item, sale_item_id must belong to sale_id,
- *            quantity > 0 (chk_return_item_quantity),
- *            quantity <= remaining_eligible_quantity (accounting for prior non-rejected returns),
- *            refund_unit_price >= 0 (chk_return_item_refund_price)
- *   - refund_subtotal is NEVER accepted or stored manually (MySQL GENERATED ALWAYS column)
- *   - Does NOT modify inventory quantities, create stock_movements, or process real refunds.
  */
 export async function createSalesReturn(payload) {
   if (!payload || typeof payload !== 'object') {
@@ -1848,12 +2176,6 @@ export async function createSalesReturn(payload) {
   const saleId = Number(payload.sale_id);
   if (!Number.isInteger(saleId) || saleId <= 0) {
     throw new Error('A valid original sale (sale_id) must be selected.');
-  }
-
-  const enrichedSales = getEnrichedMockSales();
-  const matchedSale = enrichedSales.find((s) => s.sale_id === saleId);
-  if (!matchedSale) {
-    throw new Error(`Original sale #${payload.sale_id} does not exist.`);
   }
 
   const trimmedReason = String(payload.return_reason ?? '').trim();
@@ -1869,6 +2191,55 @@ export async function createSalesReturn(payload) {
   const rawItems = Array.isArray(payload.items) ? payload.items : [];
   if (rawItems.length === 0) {
     throw new Error('At least one returned sale item is required.');
+  }
+
+  for (const rawItem of rawItems) {
+    if (rawItem && typeof rawItem === 'object' && 'refund_subtotal' in rawItem) {
+      throw new Error(
+        'Do not submit refund_subtotal manually; it is a MySQL GENERATED ALWAYS STORED column.'
+      );
+    }
+  }
+
+  if (!IS_DEVELOPMENT_MOCK_MODE) {
+    const trimmedNotes = payload.notes ? String(payload.notes).trim() : null;
+    const apiPayload = {
+      sale_id: saleId,
+      return_reason: trimmedReason,
+      ...(payload.return_date
+        ? { return_date: new Date(payload.return_date).toISOString() }
+        : {}),
+      ...(trimmedNotes ? { notes: trimmedNotes } : {}),
+      items: rawItems.map((rawItem) => ({
+        sale_item_id: Number(rawItem.sale_item_id),
+        quantity: Number(rawItem.quantity),
+        ...(rawItem.refund_unit_price !== undefined &&
+        rawItem.refund_unit_price !== null &&
+        rawItem.refund_unit_price !== ''
+          ? { refund_unit_price: Number(rawItem.refund_unit_price) }
+          : {}),
+      })),
+    };
+
+    const created = await m08FetchJson(API_ENDPOINTS.CREATE_RETURN, {
+      method: 'POST',
+      body: apiPayload,
+    });
+    const rawCreated = created && created.item ? created.item : created;
+
+    return {
+      item: enrichSalesReturn(rawCreated),
+      isMockMode: false,
+      endpoint: API_ENDPOINTS.CREATE_RETURN,
+      notice:
+        'Saved to database in PENDING status via POST /api/v1/returns. Inventory quantity remains unchanged until sp_update_inventory completion.',
+    };
+  }
+
+  const enrichedSales = getEnrichedMockSales();
+  const matchedSale = enrichedSales.find((s) => s.sale_id === saleId);
+  if (!matchedSale) {
+    throw new Error(`Original sale #${payload.sale_id} does not exist.`);
   }
 
   const seenSaleItems = new Set();
@@ -2054,10 +2425,13 @@ export default {
   getStockMovements,
   getStockMovementById,
   getMockProductVariants,
+  getProductVariantsForAdjustments,
   getStockAdjustments,
   getStockAdjustmentById,
   createStockAdjustment,
   getMockSalesForReturns,
+  getSalesForReturns,
+  getSaleItemsForReturn,
   getSalesReturns,
   getSalesReturnByIdDevOnly,
   createSalesReturn,
