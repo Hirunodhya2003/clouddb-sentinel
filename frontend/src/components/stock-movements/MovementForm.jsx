@@ -1,15 +1,24 @@
 // Owner: Member 08
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   IS_DEVELOPMENT_MOCK_MODE,
   API_ENDPOINTS,
   VALID_ADJUSTMENT_TYPES,
   ADJUSTMENT_TYPE_META,
+  getSaleItemsForReturn,
 } from '../../services/stockMovementService.js';
 
 function generateSuggestedReference() {
   const randomSuffix = Math.floor(2105 + Math.random() * 890);
   return `ADJ-2026-${randomSuffix}`;
+}
+
+export function getCurrentLocalDateInput() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 export function formatCurrencyINR(amount) {
@@ -37,15 +46,24 @@ export function formatCurrencyINR(amount) {
  */
 function SalesReturnCreationForm({
   sales = [],
+  isSalesLoading = false,
+  salesError = null,
+  onRetryLoadSales,
   onSubmitReturn,
   onCancel,
 }) {
   const [selectedSaleId, setSelectedSaleId] = useState('');
   const [selectedSaleItemId, setSelectedSaleItemId] = useState('');
-  const [returnDate, setReturnDate] = useState('2026-11-17');
+  const [returnDate, setReturnDate] = useState(() =>
+    getCurrentLocalDateInput()
+  );
   const [returnQuantity, setReturnQuantity] = useState('1');
   const [returnReason, setReturnReason] = useState('');
   const [notes, setNotes] = useState('');
+
+  const [liveSaleItems, setLiveSaleItems] = useState(null);
+  const [isItemsLoading, setIsItemsLoading] = useState(false);
+  const [itemsError, setItemsError] = useState(null);
 
   const [fieldErrors, setFieldErrors] = useState({});
   const [submitError, setSubmitError] = useState(null);
@@ -54,18 +72,77 @@ function SalesReturnCreationForm({
 
   const selectedSale = useMemo(() => {
     if (!selectedSaleId) return null;
-    return sales.find((s) => s.sale_id === Number(selectedSaleId)) || null;
+    return sales.find((s) => Number(s.sale_id) === Number(selectedSaleId)) || null;
   }, [sales, selectedSaleId]);
 
+  useEffect(() => {
+    let isCancelled = false;
+
+    if (!selectedSaleId || !selectedSale) {
+      setLiveSaleItems(null);
+      setIsItemsLoading(false);
+      setItemsError(null);
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    if (IS_DEVELOPMENT_MOCK_MODE) {
+      setLiveSaleItems(null);
+      setIsItemsLoading(false);
+      setItemsError(null);
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    // In LIVE API mode, fetch the actual line items for the selected sale from MySQL
+    setIsItemsLoading(true);
+    setItemsError(null);
+    setLiveSaleItems(
+      Array.isArray(selectedSale.items) ? selectedSale.items : null
+    );
+
+    getSaleItemsForReturn(Number(selectedSaleId))
+      .then((res) => {
+        if (!isCancelled) {
+          setLiveSaleItems(Array.isArray(res.items) ? res.items : []);
+        }
+      })
+      .catch((err) => {
+        if (!isCancelled) {
+          setItemsError(
+            err instanceof Error
+              ? err.message
+              : 'Unable to load sale line items for the selected sale.'
+          );
+          setLiveSaleItems([]);
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsItemsLoading(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [selectedSaleId, selectedSale]);
+
   const availableSaleItems = useMemo(() => {
-    return selectedSale?.items || [];
-  }, [selectedSale]);
+    if (!selectedSale) return [];
+    if (!IS_DEVELOPMENT_MOCK_MODE && Array.isArray(liveSaleItems)) {
+      return liveSaleItems;
+    }
+    return Array.isArray(selectedSale.items) ? selectedSale.items : [];
+  }, [selectedSale, liveSaleItems]);
 
   const selectedSaleItem = useMemo(() => {
     if (!selectedSaleItemId || !selectedSale) return null;
     return (
       availableSaleItems.find(
-        (item) => item.sale_item_id === Number(selectedSaleItemId)
+        (item) => Number(item.sale_item_id) === Number(selectedSaleItemId)
       ) || null
     );
   }, [availableSaleItems, selectedSale, selectedSaleItemId]);
@@ -86,6 +163,7 @@ function SalesReturnCreationForm({
     setSelectedSaleItemId('');
     setReturnQuantity('1');
     setSubmitError(null);
+    setItemsError(null);
     setFieldErrors((prev) => ({
       ...prev,
       sale_id: null,
@@ -100,8 +178,8 @@ function SalesReturnCreationForm({
     setSubmitError(null);
 
     if (nextItemId && selectedSale) {
-      const matchedItem = (selectedSale.items || []).find(
-        (i) => i.sale_item_id === Number(nextItemId)
+      const matchedItem = availableSaleItems.find(
+        (i) => Number(i.sale_item_id) === Number(nextItemId)
       );
       if (matchedItem) {
         setReturnQuantity(
@@ -167,7 +245,7 @@ function SalesReturnCreationForm({
   const handleReset = () => {
     setSelectedSaleId('');
     setSelectedSaleItemId('');
-    setReturnDate('2026-11-17');
+    setReturnDate(getCurrentLocalDateInput());
     setReturnQuantity('1');
     setReturnReason('');
     setNotes('');
@@ -176,8 +254,13 @@ function SalesReturnCreationForm({
     setSubmitSuccess(null);
   };
 
+  const isSaveLocked = Boolean(submitSuccess);
+
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (isSubmitting || isSaveLocked) {
+      return;
+    }
     setSubmitError(null);
     setSubmitSuccess(null);
 
@@ -270,7 +353,7 @@ function SalesReturnCreationForm({
             type="submit"
             form="m08-create-return-form"
             className="m08-sa-btn-primary"
-            disabled={isSubmitting}
+            disabled={isSubmitting || isSaveLocked}
           >
             {isSubmitting ? 'Saving...' : 'Save changes'}
           </button>
@@ -286,6 +369,31 @@ function SalesReturnCreationForm({
           </p>
         </div>
 
+        {salesError && (
+          <div className="m08-sa-alert m08-sa-alert-error" role="alert">
+            <strong>Unable to load eligible sales from database:</strong>{' '}
+            {salesError}
+            {onRetryLoadSales && (
+              <div style={{ marginTop: '10px' }}>
+                <button
+                  type="button"
+                  className="m08-sa-btn-secondary"
+                  onClick={onRetryLoadSales}
+                >
+                  Retry loading sales
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!isSalesLoading && !salesError && sales.length === 0 && (
+          <div className="m08-sa-alert" role="status">
+            <strong>No completed sales available:</strong> No COMPLETED sales
+            were found in the database to register a return against.
+          </div>
+        )}
+
         {submitError && (
           <div className="m08-sa-alert m08-sa-alert-error" role="alert">
             <strong>Validation / Submission Error:</strong> {submitError}
@@ -299,14 +407,23 @@ function SalesReturnCreationForm({
             aria-live="polite"
           >
             <div className="m08-sa-alert-title">
-              Mock Sales Return Created: {submitSuccess.returnCode} against{' '}
-              {submitSuccess.saleCode} ({submitSuccess.invoiceNumber}) · Status:{' '}
-              {submitSuccess.status} · Refund:{' '}
-              {formatCurrencyINR(submitSuccess.totalRefund)}
+              {IS_DEVELOPMENT_MOCK_MODE
+                ? 'Mock Sales Return Created:'
+                : 'Sales Return Created (PENDING):'}{' '}
+              {submitSuccess.returnCode} against {submitSuccess.saleCode} (
+              {submitSuccess.invoiceNumber}) · Status: {submitSuccess.status} ·
+              Refund: {formatCurrencyINR(submitSuccess.totalRefund)}
             </div>
             <p className="m08-sa-alert-text">{submitSuccess.notice}</p>
-            {onCancel && (
-              <div style={{ marginTop: '10px' }}>
+            <div
+              style={{
+                marginTop: '10px',
+                display: 'flex',
+                gap: '10px',
+                flexWrap: 'wrap',
+              }}
+            >
+              {onCancel && (
                 <button
                   type="button"
                   className="m08-sa-btn-secondary"
@@ -314,8 +431,15 @@ function SalesReturnCreationForm({
                 >
                   View in Sales Returns directory →
                 </button>
-              </div>
-            )}
+              )}
+              <button
+                type="button"
+                className="m08-sa-btn-secondary"
+                onClick={handleReset}
+              >
+                + Create another return
+              </button>
+            </div>
           </div>
         )}
 
@@ -334,18 +458,32 @@ function SalesReturnCreationForm({
               </label>
               <select
                 id="m08-ret-sale"
-                className={`m08-sa-input ${
-                  fieldErrors.sale_id ? 'm08-sa-input-error' : ''
-                }`}
+                className={`m08-sa-input ${fieldErrors.sale_id ? 'm08-sa-input-error' : ''
+                  }`}
                 value={selectedSaleId}
                 onChange={handleSaleChange}
+                disabled={
+                  isSubmitting ||
+                  isSaveLocked ||
+                  isSalesLoading ||
+                  Boolean(salesError) ||
+                  sales.length === 0
+                }
                 required
               >
-                <option value="">Enter details / Select original sale</option>
+                <option value="">
+                  {isSalesLoading
+                    ? 'Loading completed sales from database...'
+                    : salesError
+                      ? 'Unable to load sales'
+                      : sales.length === 0
+                        ? 'No completed sales available'
+                        : 'Enter details / Select original sale'}
+                </option>
                 {sales.map((sale) => (
                   <option key={sale.sale_id} value={sale.sale_id}>
                     SAL-{sale.sale_id} · {sale.invoice_number} —{' '}
-                    {sale.customer_name} ({sale.sale_label})
+                    {sale.customer_name} ({sale.sale_label || 'Completed sale'})
                   </option>
                 ))}
               </select>
@@ -370,18 +508,30 @@ function SalesReturnCreationForm({
               </label>
               <select
                 id="m08-ret-sale-item"
-                className={`m08-sa-input ${
-                  fieldErrors.sale_item_id ? 'm08-sa-input-error' : ''
-                }`}
+                className={`m08-sa-input ${fieldErrors.sale_item_id ? 'm08-sa-input-error' : ''
+                  }`}
                 value={selectedSaleItemId}
                 onChange={handleSaleItemChange}
-                disabled={!selectedSale}
+                disabled={
+                  isSubmitting ||
+                  isSaveLocked ||
+                  !selectedSale ||
+                  isSalesLoading ||
+                  isItemsLoading ||
+                  Boolean(itemsError)
+                }
                 required
               >
                 <option value="">
-                  {selectedSale
-                    ? 'Select an option'
-                    : 'Select an original sale first'}
+                  {!selectedSale
+                    ? 'Select an original sale first'
+                    : isItemsLoading && availableSaleItems.length === 0
+                      ? 'Loading sale line items...'
+                      : itemsError
+                        ? 'Unable to load sale line items'
+                        : availableSaleItems.length === 0
+                          ? 'No line items found for selected sale'
+                          : 'Select an option'}
                 </option>
                 {availableSaleItems.map((item) => (
                   <option key={item.sale_item_id} value={item.sale_item_id}>
@@ -392,6 +542,11 @@ function SalesReturnCreationForm({
                   </option>
                 ))}
               </select>
+              {itemsError && (
+                <span className="m08-sa-field-error" role="alert">
+                  {itemsError}
+                </span>
+              )}
               {selectedSaleItem && (
                 <span className="m08-sa-field-hint">
                   Sale Item #{selectedSaleItem.sale_item_id} · Variant #
@@ -419,11 +574,11 @@ function SalesReturnCreationForm({
               <input
                 id="m08-ret-date"
                 type="date"
-                className={`m08-sa-input ${
-                  fieldErrors.return_date ? 'm08-sa-input-error' : ''
-                }`}
+                className={`m08-sa-input ${fieldErrors.return_date ? 'm08-sa-input-error' : ''
+                  }`}
                 value={returnDate}
                 onChange={(e) => setReturnDate(e.target.value)}
+                disabled={isSubmitting || isSaveLocked}
                 required
               />
               {fieldErrors.return_date && (
@@ -446,9 +601,8 @@ function SalesReturnCreationForm({
                     min="1"
                     max={selectedSaleItem?.remaining_eligible_quantity ?? undefined}
                     step="1"
-                    className={`m08-sa-input ${
-                      fieldErrors.quantity ? 'm08-sa-input-error' : ''
-                    }`}
+                    className={`m08-sa-input ${fieldErrors.quantity ? 'm08-sa-input-error' : ''
+                      }`}
                     placeholder="0"
                     value={returnQuantity}
                     onChange={(e) => {
@@ -457,6 +611,7 @@ function SalesReturnCreationForm({
                         setFieldErrors((prev) => ({ ...prev, quantity: null }));
                       }
                     }}
+                    disabled={isSubmitting || isSaveLocked}
                     required
                   />
                 </div>
@@ -506,9 +661,8 @@ function SalesReturnCreationForm({
                 id="m08-ret-reason"
                 type="text"
                 maxLength={255}
-                className={`m08-sa-input ${
-                  fieldErrors.return_reason ? 'm08-sa-input-error' : ''
-                }`}
+                className={`m08-sa-input ${fieldErrors.return_reason ? 'm08-sa-input-error' : ''
+                  }`}
                 placeholder="Enter details (required return reason, max 255 chars)"
                 value={returnReason}
                 onChange={(e) => {
@@ -520,6 +674,7 @@ function SalesReturnCreationForm({
                     }));
                   }
                 }}
+                disabled={isSubmitting || isSaveLocked}
                 required
               />
               {fieldErrors.return_reason && (
@@ -539,6 +694,7 @@ function SalesReturnCreationForm({
                   placeholder="Optional inspection notes (sales_returns.notes)"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
+                  disabled={isSubmitting || isSaveLocked}
                 />
               </div>
             </div>
@@ -593,7 +749,7 @@ function SalesReturnCreationForm({
               <button
                 type="submit"
                 className="m08-sa-btn-primary"
-                disabled={isSubmitting}
+                disabled={isSubmitting || isSaveLocked}
               >
                 {isSubmitting ? 'Saving...' : 'Save changes'}
               </button>
@@ -621,6 +777,9 @@ export default function MovementForm(props) {
   const {
     mode = 'adjustment',
     variants = [],
+    isVariantsLoading = false,
+    variantsError = null,
+    onRetryLoadVariants,
     existingReferences = [],
     onSubmitAdjustment,
     onCancel,
@@ -630,7 +789,9 @@ export default function MovementForm(props) {
     return <SalesReturnCreationForm {...props} />;
   }
   const [adjustmentReference, setAdjustmentReference] = useState('ADJ-2026-2105');
-  const [adjustmentDate, setAdjustmentDate] = useState('2026-11-17');
+  const [adjustmentDate, setAdjustmentDate] = useState(() =>
+    getCurrentLocalDateInput()
+  );
   const [adjustmentType, setAdjustmentType] = useState('PHYSICAL_COUNT');
   const [reason, setReason] = useState('');
   const [variantId, setVariantId] = useState('');
@@ -645,7 +806,9 @@ export default function MovementForm(props) {
 
   const selectedVariant = useMemo(() => {
     if (!variantId) return null;
-    return variants.find((v) => v.variant_id === Number(variantId)) || null;
+    return (
+      variants.find((v) => Number(v.variant_id) === Number(variantId)) || null
+    );
   }, [variants, variantId]);
 
   // Real-time calculation of quantity_difference = quantity_after - quantity_before for display only
@@ -669,11 +832,19 @@ export default function MovementForm(props) {
     setSubmitError(null);
 
     if (nextVariantId) {
-      const matched = variants.find((v) => v.variant_id === Number(nextVariantId));
+      const matched = variants.find(
+        (v) => Number(v.variant_id) === Number(nextVariantId)
+      );
       if (matched && typeof matched.current_quantity_on_hand === 'number') {
         setQuantityBefore(String(matched.current_quantity_on_hand));
         setQuantityAfter(String(matched.current_quantity_on_hand));
+      } else {
+        setQuantityBefore('0');
+        setQuantityAfter('0');
       }
+    } else {
+      setQuantityBefore('0');
+      setQuantityAfter('0');
     }
 
     if (fieldErrors.variant_id) {
@@ -749,7 +920,7 @@ export default function MovementForm(props) {
 
   const handleReset = () => {
     setAdjustmentReference(generateSuggestedReference());
-    setAdjustmentDate('2026-11-17');
+    setAdjustmentDate(getCurrentLocalDateInput());
     setAdjustmentType('PHYSICAL_COUNT');
     setReason('');
     setVariantId('');
@@ -761,8 +932,13 @@ export default function MovementForm(props) {
     setSubmitSuccess(null);
   };
 
+  const isSaveLocked = Boolean(submitSuccess);
+
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (isSubmitting || isSaveLocked) {
+      return;
+    }
     setSubmitError(null);
     setSubmitSuccess(null);
 
@@ -780,7 +956,7 @@ export default function MovementForm(props) {
       adjustment_date: `${adjustmentDate}T12:00:00Z`,
       adjustment_type: adjustmentType,
       reason: reason.trim(),
-      created_by: 4,
+      created_by: IS_DEVELOPMENT_MOCK_MODE ? 4 : null,
       items: [
         {
           variant_id: Number(variantId),
@@ -854,7 +1030,7 @@ export default function MovementForm(props) {
             type="submit"
             form="m08-create-adjustment-form"
             className="m08-sa-btn-primary"
-            disabled={isSubmitting}
+            disabled={isSubmitting || isSaveLocked}
           >
             {isSubmitting ? 'Saving...' : 'Save changes'}
           </button>
@@ -870,6 +1046,31 @@ export default function MovementForm(props) {
           </p>
         </div>
 
+        {variantsError && (
+          <div className="m08-sa-alert m08-sa-alert-error" role="alert">
+            <strong>Unable to load product variants from database:</strong>{' '}
+            {variantsError}
+            {onRetryLoadVariants && (
+              <div style={{ marginTop: '10px' }}>
+                <button
+                  type="button"
+                  className="m08-sa-btn-secondary"
+                  onClick={onRetryLoadVariants}
+                >
+                  Retry loading product variants
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!isVariantsLoading && !variantsError && variants.length === 0 && (
+          <div className="m08-sa-alert" role="status">
+            <strong>No product variants available:</strong> No product variants
+            were found in the database to create a stock adjustment for.
+          </div>
+        )}
+
         {submitError && (
           <div className="m08-sa-alert m08-sa-alert-error" role="alert">
             <strong>Validation / Submission Error:</strong> {submitError}
@@ -883,12 +1084,21 @@ export default function MovementForm(props) {
             aria-live="polite"
           >
             <div className="m08-sa-alert-title">
-              Mock Adjustment Created: {submitSuccess.reference} (Status:{' '}
-              {submitSuccess.status})
+              {IS_DEVELOPMENT_MOCK_MODE
+                ? 'Mock Adjustment Created:'
+                : 'Stock Adjustment Created (PENDING):'}{' '}
+              {submitSuccess.reference} (Status: {submitSuccess.status})
             </div>
             <p className="m08-sa-alert-text">{submitSuccess.notice}</p>
-            {onCancel && (
-              <div style={{ marginTop: '10px' }}>
+            <div
+              style={{
+                marginTop: '10px',
+                display: 'flex',
+                gap: '10px',
+                flexWrap: 'wrap',
+              }}
+            >
+              {onCancel && (
                 <button
                   type="button"
                   className="m08-sa-btn-secondary"
@@ -896,8 +1106,15 @@ export default function MovementForm(props) {
                 >
                   View in Stock Adjustments directory →
                 </button>
-              </div>
-            )}
+              )}
+              <button
+                type="button"
+                className="m08-sa-btn-secondary"
+                onClick={handleReset}
+              >
+                + Create another adjustment
+              </button>
+            </div>
           </div>
         )}
 
@@ -921,7 +1138,9 @@ export default function MovementForm(props) {
                 <button
                   type="button"
                   className="m08-sa-link-btn"
+                  disabled={isSubmitting || isSaveLocked}
                   onClick={() => {
+                    if (isSubmitting || isSaveLocked) return;
                     setAdjustmentReference(generateSuggestedReference());
                     if (fieldErrors.adjustment_reference) {
                       setFieldErrors((prev) => ({
@@ -938,9 +1157,8 @@ export default function MovementForm(props) {
                 id="m08-adj-reference"
                 type="text"
                 maxLength={50}
-                className={`m08-sa-input ${
-                  fieldErrors.adjustment_reference ? 'm08-sa-input-error' : ''
-                }`}
+                className={`m08-sa-input ${fieldErrors.adjustment_reference ? 'm08-sa-input-error' : ''
+                  }`}
                 placeholder="Enter details (e.g. ADJ-2026-2105)"
                 value={adjustmentReference}
                 onChange={(e) => {
@@ -952,6 +1170,7 @@ export default function MovementForm(props) {
                     }));
                   }
                 }}
+                disabled={isSubmitting || isSaveLocked}
                 required
               />
               {fieldErrors.adjustment_reference && (
@@ -968,14 +1187,28 @@ export default function MovementForm(props) {
               </label>
               <select
                 id="m08-adj-variant"
-                className={`m08-sa-input ${
-                  fieldErrors.variant_id ? 'm08-sa-input-error' : ''
-                }`}
+                className={`m08-sa-input ${fieldErrors.variant_id ? 'm08-sa-input-error' : ''
+                  }`}
                 value={variantId}
                 onChange={handleVariantChange}
+                disabled={
+                  isSubmitting ||
+                  isSaveLocked ||
+                  isVariantsLoading ||
+                  Boolean(variantsError) ||
+                  variants.length === 0
+                }
                 required
               >
-                <option value="">Select an option</option>
+                <option value="">
+                  {isVariantsLoading
+                    ? 'Loading product variants from database...'
+                    : variantsError
+                      ? 'Unable to load product variants'
+                      : variants.length === 0
+                        ? 'No product variants available'
+                        : 'Select an option'}
+                </option>
                 {variants.map((variant) => (
                   <option key={variant.variant_id} value={variant.variant_id}>
                     {variant.sku} · {variant.product_name} ({variant.size_name} /{' '}
@@ -1008,11 +1241,11 @@ export default function MovementForm(props) {
                   <input
                     id="m08-adj-date"
                     type="date"
-                    className={`m08-sa-input ${
-                      fieldErrors.adjustment_date ? 'm08-sa-input-error' : ''
-                    }`}
+                    className={`m08-sa-input ${fieldErrors.adjustment_date ? 'm08-sa-input-error' : ''
+                      }`}
                     value={adjustmentDate}
                     onChange={(e) => setAdjustmentDate(e.target.value)}
+                    disabled={isSubmitting || isSaveLocked}
                     required
                   />
                   {fieldErrors.adjustment_date && (
@@ -1028,11 +1261,11 @@ export default function MovementForm(props) {
                   </label>
                   <select
                     id="m08-adj-type"
-                    className={`m08-sa-input ${
-                      fieldErrors.adjustment_type ? 'm08-sa-input-error' : ''
-                    }`}
+                    className={`m08-sa-input ${fieldErrors.adjustment_type ? 'm08-sa-input-error' : ''
+                      }`}
                     value={adjustmentType}
                     onChange={(e) => setAdjustmentType(e.target.value)}
+                    disabled={isSubmitting || isSaveLocked}
                     required
                   >
                     {VALID_ADJUSTMENT_TYPES.map((typeCode) => (
@@ -1058,9 +1291,8 @@ export default function MovementForm(props) {
                     type="number"
                     min="0"
                     step="1"
-                    className={`m08-sa-input ${
-                      fieldErrors.quantity_before ? 'm08-sa-input-error' : ''
-                    }`}
+                    className={`m08-sa-input ${fieldErrors.quantity_before ? 'm08-sa-input-error' : ''
+                      }`}
                     placeholder="0"
                     value={quantityBefore}
                     onChange={(e) => {
@@ -1072,6 +1304,7 @@ export default function MovementForm(props) {
                         }));
                       }
                     }}
+                    disabled={isSubmitting || isSaveLocked}
                     required
                   />
                 </div>
@@ -1085,9 +1318,8 @@ export default function MovementForm(props) {
                     type="number"
                     min="0"
                     step="1"
-                    className={`m08-sa-input ${
-                      fieldErrors.quantity_after ? 'm08-sa-input-error' : ''
-                    }`}
+                    className={`m08-sa-input ${fieldErrors.quantity_after ? 'm08-sa-input-error' : ''
+                      }`}
                     placeholder="0"
                     value={quantityAfter}
                     onChange={(e) => {
@@ -1099,6 +1331,7 @@ export default function MovementForm(props) {
                         }));
                       }
                     }}
+                    disabled={isSubmitting || isSaveLocked}
                     required
                   />
                 </div>
@@ -1114,9 +1347,8 @@ export default function MovementForm(props) {
                   >
                     {quantityDifferencePreview === null
                       ? '—'
-                      : `${
-                          quantityDifferencePreview > 0 ? '+' : ''
-                        }${quantityDifferencePreview} units`}
+                      : `${quantityDifferencePreview > 0 ? '+' : ''
+                      }${quantityDifferencePreview} units`}
                   </div>
                 </div>
               </div>
@@ -1145,9 +1377,8 @@ export default function MovementForm(props) {
               <input
                 id="m08-adj-reason"
                 type="text"
-                className={`m08-sa-input ${
-                  fieldErrors.reason ? 'm08-sa-input-error' : ''
-                }`}
+                className={`m08-sa-input ${fieldErrors.reason ? 'm08-sa-input-error' : ''
+                  }`}
                 placeholder="Enter details (required adjustment reason)"
                 value={reason}
                 onChange={(e) => {
@@ -1156,6 +1387,7 @@ export default function MovementForm(props) {
                     setFieldErrors((prev) => ({ ...prev, reason: null }));
                   }
                 }}
+                disabled={isSubmitting || isSaveLocked}
                 required
               />
               {fieldErrors.reason && (
@@ -1172,12 +1404,12 @@ export default function MovementForm(props) {
                   id="m08-item-reason"
                   type="text"
                   maxLength={255}
-                  className={`m08-sa-input ${
-                    fieldErrors.item_reason ? 'm08-sa-input-error' : ''
-                  }`}
+                  className={`m08-sa-input ${fieldErrors.item_reason ? 'm08-sa-input-error' : ''
+                    }`}
                   placeholder="Optional item-specific note (stock_adjustment_items.item_reason)"
                   value={itemReason}
                   onChange={(e) => setItemReason(e.target.value)}
+                  disabled={isSubmitting || isSaveLocked}
                 />
                 {fieldErrors.item_reason && (
                   <span className="m08-sa-field-error" role="alert">
@@ -1236,7 +1468,7 @@ export default function MovementForm(props) {
               <button
                 type="submit"
                 className="m08-sa-btn-primary"
-                disabled={isSubmitting}
+                disabled={isSubmitting || isSaveLocked}
               >
                 {isSubmitting ? 'Saving...' : 'Save changes'}
               </button>

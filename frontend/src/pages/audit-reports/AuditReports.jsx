@@ -31,6 +31,9 @@ export default function AuditReports() {
 
   // Details Modal State
   const [selectedRecord, setSelectedRecord] = useState(null);
+  const [schemaNotice, setSchemaNotice] = useState(
+    AUDIT_SCHEMA_DEPENDENCY_NOTICE
+  );
 
   const loadReports = useCallback(
     async (scopeToLoad = reportScope, simulateError = false) => {
@@ -42,6 +45,9 @@ export default function AuditReports() {
             ? await getStockAuditReports({ simulateError })
             : await getAuditReports({ simulateError });
         setRecords(Array.isArray(response.items) ? response.items : []);
+        setSchemaNotice(
+          response?.schemaDependencyNotice || AUDIT_SCHEMA_DEPENDENCY_NOTICE
+        );
       } catch (err) {
         setError(
           err instanceof Error
@@ -211,7 +217,7 @@ export default function AuditReports() {
         .join(',')
     );
 
-    const csvContent = [headers.join(','), ...rows].join('\n');
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -1112,9 +1118,8 @@ export default function AuditReports() {
 
         {/* Member 10 Schema Dependency Notice */}
         <div className="m08-ar-dependency-banner" role="note">
-          <strong>Schema &amp; Endpoint Notice:</strong>{' '}
-          {AUDIT_SCHEMA_DEPENDENCY_NOTICE} Active endpoint scope:{' '}
-          <code>{activeEndpoint}</code>.
+          <strong>Schema &amp; Endpoint Notice:</strong> {schemaNotice} Active
+          endpoint scope: <code>{activeEndpoint}</code>.
         </div>
 
         {/* Row 1: 4 Summary KPI Cards matching Figma UI 48 */}

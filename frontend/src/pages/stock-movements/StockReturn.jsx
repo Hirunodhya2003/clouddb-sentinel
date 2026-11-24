@@ -25,6 +25,8 @@ export default function StockReturn() {
   const [salesList, setSalesList] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [isSalesLoading, setIsSalesLoading] = useState(true);
+  const [salesError, setSalesError] = useState(null);
 
   // View toggle: 'list' (Figma UI 20) vs 'create' (Figma UI 21)
   const [activeView, setActiveView] = useState('list');
@@ -41,27 +43,51 @@ export default function StockReturn() {
   const [detailsError, setDetailsError] = useState(null);
   const [recentMockBanner, setRecentMockBanner] = useState(null);
 
-  const loadData = useCallback(async (simulateError = false) => {
-    setIsLoading(true);
-    setError(null);
+  const loadEligibleSales = useCallback(async () => {
+    setIsSalesLoading(true);
+    setSalesError(null);
     try {
-      const [returnsRes, salesRes] = await Promise.all([
-        getSalesReturns({ simulateError }),
-        getMockSalesForReturns(),
-      ]);
-      setReturnsList(Array.isArray(returnsRes.items) ? returnsRes.items : []);
+      const salesRes = await getMockSalesForReturns();
       setSalesList(Array.isArray(salesRes.items) ? salesRes.items : []);
     } catch (err) {
-      setError(
+      setSalesError(
         err instanceof Error
           ? err.message
-          : 'An unexpected error occurred while loading sales returns.'
+          : 'Unable to load eligible completed sales for return.'
       );
-      setReturnsList([]);
+      setSalesList([]);
     } finally {
-      setIsLoading(false);
+      setIsSalesLoading(false);
     }
   }, []);
+
+  const loadData = useCallback(
+    async (simulateError = false) => {
+      setIsLoading(true);
+      setError(null);
+
+      const returnsPromise = (async () => {
+        try {
+          const returnsRes = await getSalesReturns({ simulateError });
+          setReturnsList(
+            Array.isArray(returnsRes.items) ? returnsRes.items : []
+          );
+        } catch (err) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'An unexpected error occurred while loading sales returns.'
+          );
+          setReturnsList([]);
+        } finally {
+          setIsLoading(false);
+        }
+      })();
+
+      await Promise.all([returnsPromise, loadEligibleSales()]);
+    },
+    [loadEligibleSales]
+  );
 
   useEffect(() => {
     loadData(false);
@@ -245,7 +271,7 @@ export default function StockReturn() {
         .join(',');
     });
 
-    const csvContent = [headers.join(','), ...rows].join('\n');
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -1067,6 +1093,9 @@ export default function StockReturn() {
           <MovementForm
             mode="return"
             sales={salesList}
+            isSalesLoading={isSalesLoading}
+            salesError={salesError}
+            onRetryLoadSales={loadEligibleSales}
             onSubmitReturn={handleSubmitReturn}
             onCancel={() => setActiveView('list')}
           />

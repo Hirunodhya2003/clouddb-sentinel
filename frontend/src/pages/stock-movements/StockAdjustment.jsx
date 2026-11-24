@@ -25,6 +25,8 @@ export default function StockAdjustment() {
   const [variants, setVariants] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [isVariantsLoading, setIsVariantsLoading] = useState(true);
+  const [variantsError, setVariantsError] = useState(null);
 
   // View toggle: 'list' (Figma UI 18) vs 'create' (Figma UI 19)
   const [activeView, setActiveView] = useState('list');
@@ -41,29 +43,51 @@ export default function StockAdjustment() {
   const [detailsError, setDetailsError] = useState(null);
   const [recentMockBanner, setRecentMockBanner] = useState(null);
 
-  const loadData = useCallback(async (simulateError = false) => {
-    setIsLoading(true);
-    setError(null);
+  const loadProductVariants = useCallback(async () => {
+    setIsVariantsLoading(true);
+    setVariantsError(null);
     try {
-      const [adjustmentsRes, variantsRes] = await Promise.all([
-        getStockAdjustments({ simulateError }),
-        getMockProductVariants(),
-      ]);
-      setAdjustments(
-        Array.isArray(adjustmentsRes.items) ? adjustmentsRes.items : []
-      );
+      const variantsRes = await getMockProductVariants();
       setVariants(Array.isArray(variantsRes.items) ? variantsRes.items : []);
     } catch (err) {
-      setError(
+      setVariantsError(
         err instanceof Error
           ? err.message
-          : 'An unexpected error occurred while loading stock adjustments.'
+          : 'Unable to load product variants from the database.'
       );
-      setAdjustments([]);
+      setVariants([]);
     } finally {
-      setIsLoading(false);
+      setIsVariantsLoading(false);
     }
   }, []);
+
+  const loadData = useCallback(
+    async (simulateError = false) => {
+      setIsLoading(true);
+      setError(null);
+
+      const adjustmentsPromise = (async () => {
+        try {
+          const adjustmentsRes = await getStockAdjustments({ simulateError });
+          setAdjustments(
+            Array.isArray(adjustmentsRes.items) ? adjustmentsRes.items : []
+          );
+        } catch (err) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'An unexpected error occurred while loading stock adjustments.'
+          );
+          setAdjustments([]);
+        } finally {
+          setIsLoading(false);
+        }
+      })();
+
+      await Promise.all([adjustmentsPromise, loadProductVariants()]);
+    },
+    [loadProductVariants]
+  );
 
   useEffect(() => {
     loadData(false);
@@ -236,7 +260,7 @@ export default function StockAdjustment() {
         .join(',');
     });
 
-    const csvContent = [headers.join(','), ...rows].join('\n');
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -1072,6 +1096,9 @@ export default function StockAdjustment() {
         {activeView === 'create' ? (
           <MovementForm
             variants={variants}
+            isVariantsLoading={isVariantsLoading}
+            variantsError={variantsError}
+            onRetryLoadVariants={loadProductVariants}
             existingReferences={existingReferences}
             onSubmitAdjustment={handleSubmitAdjustment}
             onCancel={() => setActiveView('list')}
@@ -1137,8 +1164,10 @@ export default function StockAdjustment() {
                   role="status"
                 >
                   <div className="m08-sa-alert-title">
-                    Recent Mock Submission: {recentMockBanner.reference} (
-                    {recentMockBanner.status})
+                    {IS_DEVELOPMENT_MOCK_MODE
+                      ? 'Recent Mock Submission:'
+                      : 'Recent Adjustment Submission (PENDING):'}{' '}
+                    {recentMockBanner.reference} ({recentMockBanner.status})
                   </div>
                   <p className="m08-sa-alert-text">
                     {recentMockBanner.notice}
@@ -1484,7 +1513,11 @@ export default function StockAdjustment() {
                   {selectedAdjustment
                     ? `Endpoint: ${API_ENDPOINTS.GET_STOCK_ADJUSTMENT_BY_ID(
                         selectedAdjustment.adjustment_id
-                      )} (Development Mock Data)`
+                      )} (${
+                        IS_DEVELOPMENT_MOCK_MODE
+                          ? 'Development Mock Data'
+                          : 'Live Database Record'
+                      })`
                     : 'Unable to retrieve record'}
                 </p>
               </div>
