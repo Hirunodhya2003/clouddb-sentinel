@@ -4,6 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI
 
 from app.api.v1.endpoints.customers import router as customers_router
+from app.api.v1.endpoints.integrity_check import (
+    router as integrity_router,
+)
 
 app = FastAPI(title="CloudDB Sentinel API")
 app.add_middleware(
@@ -17,6 +20,7 @@ app.add_middleware(
 )
 
 app.include_router(customers_router, prefix="/api/v1")
+app.include_router(integrity_router, prefix="/api/v1")
 
 
 @app.get("/health")

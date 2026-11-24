@@ -106,9 +106,11 @@ export default function CustomerList() {
         setEditingCustomer(null);
       }
 
-      if (selectedCustomerId === customerId) {
-        setSelectedCustomerId(null);
-      }
+      const [selectedCustomerId, setSelectedCustomerId] = useState(null);
+
+      const selectedCustomer = customers.find(
+        (customer) => customer.id === selectedCustomerId,
+      );
 
       setCustomerToDelete(null);
     } catch (error) {
@@ -236,14 +238,9 @@ export default function CustomerList() {
                     <button
                       type="button"
                       className="secondary-button"
-                      onClick={() => {
-                        setCustomerToDelete(null);
-                        setEditingCustomer(customer);
-                        setShowForm(true);
-                        window.scrollTo({ top: 0, behavior: "smooth" });
-                      }}
+                      onClick={() => navigate(`/customers/${customer.id}`)}
                     >
-                      Edit
+                      View
                     </button>
                     <button
                       type="button"
