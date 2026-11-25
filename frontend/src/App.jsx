@@ -4,6 +4,7 @@ import "./App.css";
 
 import AppLayout from "./layouts/MainLayout";
 import LoginPage from "./pages/auth/Login";
+import SignUp from "./pages/auth/SignUp";
 import ProtectedRoute from "./pages/auth/ProtectedRoute";
 import CustomerDetails from "./pages/customers/CustomerDetails";
 import CustomerList from "./pages/customers/CustomerList";
@@ -32,6 +33,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/signup" element={<SignUp />} />
       <Route path="/403" element={<ForbiddenPage />} />
 
       <Route

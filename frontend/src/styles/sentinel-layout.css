@@ -1,0 +1,141 @@
+.sentinel-shell {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  min-height: 100dvh;
+  background: #f2f5fa;
+  color: #151d2f;
+}
+
+.sentinel-shell > .sentinel-sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  height: 100dvh;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 24px 16px;
+  background: #151d2f;
+  color: #fff;
+}
+
+.sentinel-sidebar .sentinel-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 6px;
+}
+
+.sentinel-sidebar .sentinel-brand-mark {
+  display: grid;
+  flex: 0 0 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 10px;
+  background: #3055e7;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.sentinel-sidebar .sentinel-nav,
+.sentinel-sidebar .sentinel-nav-group {
+  display: grid;
+}
+
+.sentinel-sidebar .sentinel-nav {
+  gap: 22px;
+}
+
+.sentinel-sidebar .sentinel-nav-group {
+  gap: 4px;
+}
+
+.sentinel-nav-group > p {
+  margin: 0 0 5px;
+  padding: 0 12px;
+  color: #a8b7d1;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sentinel-sidebar .sentinel-nav a {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 9px;
+  color: #d4dff2;
+  text-decoration: none;
+}
+
+.sentinel-sidebar .sentinel-nav a:hover,
+.sentinel-sidebar .sentinel-signout:hover {
+  background: #243049;
+  color: #fff;
+}
+
+.sentinel-sidebar .sentinel-nav a[aria-current="page"] {
+  background: #263b72;
+  box-shadow: inset 3px 0 #91aaff;
+  color: #fff;
+  font-weight: 600;
+}
+
+.sentinel-sidebar .sentinel-signout {
+  margin-top: auto;
+  padding: 10px 12px;
+  border: 1px solid #465471;
+  border-radius: 9px;
+  background: transparent;
+  color: #e5ecfa;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sentinel-sidebar :focus-visible {
+  outline: 2px solid #a5bbff;
+  outline-offset: 3px;
+}
+
+.sentinel-shell > .sentinel-content {
+  position: static;
+  min-width: 0;
+  width: auto;
+  max-width: none;
+  margin: 0;
+  padding: clamp(20px, 3vw, 44px);
+  box-sizing: border-box;
+}
+
+@media (max-width: 760px) {
+  .sentinel-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sentinel-shell > .sentinel-sidebar {
+    position: static;
+    height: auto;
+    gap: 16px;
+  }
+
+  .sentinel-sidebar .sentinel-nav {
+    gap: 12px;
+  }
+
+  .sentinel-sidebar .sentinel-nav-group {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .sentinel-nav-group > p {
+    flex-basis: 100%;
+  }
+
+  .sentinel-sidebar .sentinel-signout {
+    align-self: flex-start;
+  }
+}
