@@ -7,8 +7,11 @@ import {
   updateCustomer,
   deleteCustomer,
 } from "../../services/customerService";
+import CustomerTable from "../../components/customers/CustomerTable";
+import { useNavigate } from "react-router-dom";
 
 export default function CustomerList() {
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [customers, setCustomers] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -205,66 +208,16 @@ export default function CustomerList() {
           </div>
         )}
 
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Customer</th>
-                <th scope="col">Email</th>
-                <th scope="col">Phone</th>
-                <th scope="col">Status</th>
-                <th scope="col">Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {filteredCustomers.map((customer) => (
-                <tr key={customer.id}>
-                  <td>{customer.name}</td>
-                  <td>{customer.email}</td>
-                  <td>{customer.phone}</td>
-                  <td>{customer.status}</td>
-                  <td>
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      onClick={() => {
-                        setSelectedCustomerId(customer.id);
-                        window.scrollTo({ top: 0, behavior: "smooth" });
-                      }}
-                    >
-                      View
-                    </button>{" "}
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      onClick={() => navigate(`/customers/${customer.id}`)}
-                    >
-                      View
-                    </button>
-                    <button
-                      type="button"
-                      className="delete-button"
-                      onClick={() => setCustomerToDelete(customer)}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-
-              {!loading && !error && filteredCustomers.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="empty-state">
-                    {search.trim()
-                      ? "No customers match your search."
-                      : "No customers added yet."}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <CustomerTable
+          customers={filteredCustomers}
+          loading={loading}
+          error={error}
+          search={search}
+          busy={saving}
+          onView={(customer) => navigate(`/customers/${customer.id}`)}
+          onEdit={(customer) => navigate(`/customers/${customer.id}/edit`)}
+          onDelete={(customer) => setCustomerToDelete(customer)}
+        />
       </section>
     </>
   );
