@@ -23,7 +23,6 @@ const menuGroups = [
   },
   {
     title: "Database & Security",
-    items: ["Database Tools", "Performance", "Audit & Recovery"],
     items: [
       "Integrity Check",
       "Database Tools",
