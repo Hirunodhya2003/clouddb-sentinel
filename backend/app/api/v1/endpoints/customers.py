@@ -12,6 +12,9 @@ from app.schemas.customer import (
     CustomerUpdate,
 )
 from app.services import customer_service
+from app.schemas.customer import CustomerAnalyticsResponse
+from app.services import customer_analytics_service
+from app.services import customer_search_service
 
 router = APIRouter(prefix="/customers", tags=["Customers"])
 
@@ -29,7 +32,11 @@ def search_customers(
     db: DatabaseSession,
     q: Annotated[str, Query(min_length=1, max_length=150)],
 ):
-    return customer_service.list_customers(db, q.strip())
+    return customer_search_service.search_customers(db, q)
+
+@router.get("/analytics", response_model=CustomerAnalyticsResponse)
+def get_customer_analytics(db: DatabaseSession):
+    return customer_analytics_service.get_customer_analytics(db)
 
 
 @router.get("/{customer_id}", response_model=CustomerResponse)
