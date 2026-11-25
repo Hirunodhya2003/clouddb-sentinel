@@ -1,5 +1,11 @@
 // Owner: Member 09
-// TODO: implement
-export default function ExplainViewer() {
-  return null;
+// Initial ExplainViewer structure before interactive refinements.
+
+export default function ExplainViewer(props = {}) {
+  const title = props.title || "ExplainViewer";
+  return (
+    <section className="card" aria-label={title}>
+      <h3>{title}</h3>
+    </section>
+  );
 }
