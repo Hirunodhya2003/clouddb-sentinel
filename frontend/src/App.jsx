@@ -5,13 +5,21 @@ import "./App.css";
 import AppLayout from "./layouts/MainLayout";
 import LoginPage from "./pages/auth/Login";
 import ProtectedRoute from "./pages/auth/ProtectedRoute";
+import CategoryList from "./pages/categories/CategoryList";
+import CreateCategory from "./pages/categories/CreateCategory";
+import EditCategory from "./pages/categories/EditCategory";
 import CustomerDetails from "./pages/customers/CustomerDetails";
 import CustomerList from "./pages/customers/CustomerList";
 import CreateCustomer from "./pages/customers/CreateCustomer";
 import EditCustomer from "./pages/customers/EditCustomer";
 import Dashboard from "./pages/dashboard/Dashboard";
 import IntegrityCheck from "./pages/integrity-check/IntegrityCheck";
+import CreateProduct from "./pages/products/CreateProduct";
+import EditProduct from "./pages/products/EditProduct";
+import ProductDetails from "./pages/products/ProductDetails";
+import ProductList from "./pages/products/ProductList";
 import RolesPage from "./pages/roles/RolesPage";
+import SchemaViewer from "./pages/schema-viewer/SchemaViewer";
 import UserFormPage from "./pages/users/UserFormpage";
 import UserListPage from "./pages/users/UserList";
 import UserProfilePage from "./pages/users/UserProfilePage";
@@ -45,6 +53,16 @@ export default function App() {
       >
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<Dashboard />} />
+
+        {/* Member 02: products, categories, schema viewer */}
+        <Route path="/products" element={<ProductList />} />
+        <Route path="/products/new" element={<CreateProduct />} />
+        <Route path="/products/:id/edit" element={<EditProduct />} />
+        <Route path="/products/:id" element={<ProductDetails />} />
+        <Route path="/categories" element={<CategoryList />} />
+        <Route path="/categories/new" element={<CreateCategory />} />
+        <Route path="/categories/:id/edit" element={<EditCategory />} />
+        <Route path="/schema-viewer" element={<SchemaViewer />} />
 
         <Route path="/customers" element={<CustomerList />} />
         <Route path="/customers/new" element={<CreateCustomer />} />

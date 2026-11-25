@@ -27,6 +27,13 @@ export default function MainLayout() {
           </div>
 
           <div className="sentinel-nav-group">
+            <p>Product management</p>
+            <NavLink to="/products">Products</NavLink>
+            <NavLink to="/categories">Categories</NavLink>
+            <NavLink to="/schema-viewer">Schema viewer</NavLink>
+          </div>
+
+          <div className="sentinel-nav-group">
             <p>Access management</p>
             <NavLink to="/users">Users</NavLink>
             <NavLink to="/roles">Roles &amp; permissions</NavLink>
