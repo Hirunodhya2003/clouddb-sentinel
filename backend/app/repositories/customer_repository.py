@@ -44,3 +44,28 @@ def update_customer(db: Session, customer: Customer, data: dict):
 def delete_customer(db: Session, customer: Customer):
     db.delete(customer)
     db.flush()
+
+def get_customer_analytics(db: Session):
+    from sqlalchemy import case, func
+
+    statement = select(
+        func.count(Customer.id).label("total_customers"),
+        func.coalesce(
+            func.sum(case((Customer.status == "Active", 1), else_=0)),
+            0,
+        ).label("active_customers"),
+        func.coalesce(
+            func.sum(case((Customer.status == "Inactive", 1), else_=0)),
+            0,
+        ).label("inactive_customers"),
+        func.count(
+            func.nullif(func.trim(Customer.email), "")
+        ).label("customers_with_email"),
+        func.count(
+            func.nullif(func.trim(Customer.phone), "")
+        ).label("customers_with_phone"),
+        func.min(Customer.created_at).label("earliest_registration"),
+        func.max(Customer.created_at).label("latest_registration"),
+    )
+
+    return dict(db.execute(statement).mappings().one())   
