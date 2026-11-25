@@ -4,7 +4,6 @@ import "./App.css";
 
 import AppLayout from "./layouts/MainLayout";
 import LoginPage from "./pages/auth/Login";
-import SignUp from "./pages/auth/SignUp";
 import ProtectedRoute from "./pages/auth/ProtectedRoute";
 import CategoryList from "./pages/categories/CategoryList";
 import CreateCategory from "./pages/categories/CreateCategory";
@@ -24,6 +23,8 @@ import SchemaViewer from "./pages/schema-viewer/SchemaViewer";
 import UserFormPage from "./pages/users/UserFormpage";
 import UserListPage from "./pages/users/UserList";
 import UserProfilePage from "./pages/users/UserProfilePage";
+import SignUp from "./pages/auth/SignUp";
+<Route path="/signup" element={<SignUp />} />;
 
 function ForbiddenPage() {
   return (
@@ -41,7 +42,6 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/signup" element={<SignUp />} />
       <Route path="/403" element={<ForbiddenPage />} />
 
       <Route
@@ -71,8 +71,14 @@ export default function App() {
         <Route path="/integrity-check" element={<IntegrityCheck />} />
 
         <Route path="/users" element={guard("user:read", <UserListPage />)} />
-        <Route path="/users/new" element={guard("user:create", <UserFormPage />)} />
-        <Route path="/users/:id" element={guard("user:read", <UserProfilePage />)} />
+        <Route
+          path="/users/new"
+          element={guard("user:create", <UserFormPage />)}
+        />
+        <Route
+          path="/users/:id"
+          element={guard("user:read", <UserProfilePage />)}
+        />
         <Route
           path="/users/:id/edit"
           element={guard("user:update", <UserFormPage />)}
