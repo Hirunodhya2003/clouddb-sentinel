@@ -1,2 +1,5 @@
-# Owner: Member 01
-# TODO: implement
+from sqlalchemy.orm import DeclarativeBase
+
+
+class Base(DeclarativeBase):
+    pass
