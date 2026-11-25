@@ -1,0 +1,48 @@
+/* forms */
+.form-card { max-width: 860px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 20px; margin-top: 8px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field-label { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.field input, .field select {
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+  font: inherit; background: var(--canvas);
+}
+.field input:focus, .field select:focus { outline: 2px solid var(--corporate-blue); background: var(--white); }
+.field.has-error input, .field.has-error select { border-color: var(--danger); }
+.field-error { color: var(--danger); font-size: 12px; }
+.field-hint { color: var(--text-muted); font-size: 12px; }
+.form-note { margin: 20px 0 0; font-size: 12px; color: var(--text-muted); }
+.header-actions { display: flex; gap: 10px; }
+.btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+.alert-success { margin-bottom: 12px; padding: 10px 12px; border-radius: 8px; background: #e3f6ec; color: #1e7d4b; font-size: 13px; }
+
+/* profile */
+.profile-grid { display: grid; grid-template-columns: 1fr 1.3fr; gap: 20px; align-items: start; }
+.profile-head { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+.profile-head h3 { margin: 0 0 6px; font-size: 18px; }
+.avatar {
+  width: 56px; height: 56px; border-radius: 50%; background: var(--ice-blue); color: var(--corporate-blue);
+  display: grid; place-items: center; font-weight: 700; font-size: 20px;
+}
+.detail-list { display: grid; grid-template-columns: 110px 1fr; gap: 12px; margin: 0; font-size: 14px; }
+.detail-list dt { color: var(--text-muted); }
+.detail-list dd { margin: 0; font-weight: 500; }
+.perm-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.perm-row strong { min-width: 100px; text-transform: capitalize; }
+
+/* roles matrix */
+.matrix-wrap { overflow-x: auto; }
+.matrix { width: 100%; border-collapse: collapse; font-size: 14px; }
+.matrix th, .matrix td { padding: 9px 12px; border-bottom: 1px solid var(--border); text-align: center; }
+.matrix th:first-child, .matrix td:first-child { text-align: left; }
+.matrix thead th { font-size: 12px; color: var(--text-muted); background: var(--white); }
+.matrix .module-row td {
+  background: var(--ice-blue); color: var(--deep-navy); font-weight: 700; font-size: 12px;
+  text-transform: uppercase; letter-spacing: .05em; text-align: left;
+}
+.matrix input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--corporate-blue); cursor: pointer; }
+.matrix input:disabled { cursor: not-allowed; }
+
+@media (max-width: 800px) {
+  .form-grid, .profile-grid { grid-template-columns: 1fr; }
+}
