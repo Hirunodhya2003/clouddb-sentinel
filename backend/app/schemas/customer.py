@@ -36,3 +36,12 @@ class CustomerResponse(BaseModel):
     status: Literal["Active", "Inactive"]
     created_at: datetime
     updated_at: datetime
+
+class CustomerAnalyticsResponse(BaseModel):
+    total_customers: int
+    active_customers: int
+    inactive_customers: int
+    customers_with_email: int
+    customers_with_phone: int
+    earliest_registration: datetime | None
+    latest_registration: datetime | None
