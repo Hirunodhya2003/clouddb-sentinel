@@ -144,4 +144,20 @@ describe("Member 09 Dashboard & Reports UI", () => {
       expect(screen.getByText("Interactive Business Reports")).toBeInTheDocument();
     });
   });
+
+  it("renders ReportTable rows and summary items", () => {
+    render(
+      <ReportTable
+        columns={[
+          { key: "sku", header: "SKU", mono: true },
+          { key: "quantity_on_hand", header: "On Hand" },
+        ]}
+        rows={[{ inventory_id: 1, sku: "OXF-M-BLU", quantity_on_hand: 14 }]}
+        summaryItems={[{ label: "Tracked Variants", value: 1 }]}
+      />
+    );
+
+    expect(screen.getByText("OXF-M-BLU")).toBeInTheDocument();
+    expect(screen.getByText("Tracked Variants")).toBeInTheDocument();
+  });
 });
