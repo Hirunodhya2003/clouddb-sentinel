@@ -1,5 +1,11 @@
 // Owner: Member 09
-// TODO: implement
-export default function PerformanceMonitor() {
-  return null;
+// Initial PerformanceMonitor structure before interactive refinements.
+
+export default function PerformanceMonitor(props = {}) {
+  const title = props.title || "PerformanceMonitor";
+  return (
+    <section className="card" aria-label={title}>
+      <h3>{title}</h3>
+    </section>
+  );
 }
