@@ -147,4 +147,68 @@ describe("Member 09 Query Analyzer & Performance Monitor UI", () => {
       expect(screen.getByText("idx_sales_date")).toBeInTheDocument();
     });
   });
+
+  it("renders PerformanceMonitor connection pool stats and slow queries table", async () => {
+    getPerformanceOverview.mockResolvedValue({
+      connections: {
+        mysql_version: "8.0.46",
+        threads_connected: 6,
+        threads_running: 2,
+        max_used_connections: 14,
+        max_connections: 151,
+        connection_utilization_pct: 3.97,
+        aborted_connects: 0,
+        total_connections: 42,
+        uptime_seconds: 7200,
+        questions: 1280,
+        slow_queries_count: 1,
+      },
+      table_statistics: [
+        {
+          table_name: "sales",
+          engine: "InnoDB",
+          table_rows: 320,
+          data_size_mb: 0.125,
+          index_size_mb: 0.064,
+          total_size_mb: 0.189,
+          free_space_mb: 0,
+        },
+      ],
+      slow_queries: [
+        {
+          log_id: 7,
+          query_type: "SELECT",
+          execution_time_ms: 312.4,
+          rows_examined: 4800,
+          rows_returned: 15,
+          is_slow_query: true,
+          endpoint: "/api/v1/reports/sales",
+          query_text: "SELECT * FROM sales ORDER BY sale_date DESC",
+        },
+      ],
+      query_type_breakdown: [
+        {
+          query_type: "SELECT",
+          total_executions: 25,
+          slow_executions: 1,
+          avg_execution_time_ms: 18.4,
+          max_execution_time_ms: 312.4,
+          total_rows_examined: 6200,
+        },
+      ],
+    });
+
+    render(<PerformanceMonitor />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/6 \/ 151/)).toBeInTheDocument();
+      expect(screen.getByText("SLOW")).toBeInTheDocument();
+      expect(screen.getByText("/api/v1/reports/sales")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText("Slow queries only"));
+    await waitFor(() => {
+      expect(getPerformanceOverview).toHaveBeenCalledTimes(2);
+    });
+  });
 });
