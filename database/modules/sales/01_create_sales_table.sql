@@ -6,7 +6,7 @@ USE clouddb_sentinel;
 
 CREATE TABLE IF NOT EXISTS sales (
     sale_id INT AUTO_INCREMENT PRIMARY KEY,
-    customer_id INT,
+    customer_id BIGINT UNSIGNED,
     invoice_number VARCHAR(50) NOT NULL,
     sale_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     subtotal DECIMAL(12,2) NOT NULL DEFAULT 0.00,
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS sales (
 
     CONSTRAINT fk_sales_customer
         FOREIGN KEY (customer_id)
-        REFERENCES customers(customer_id)
+        REFERENCES customers(id)
         ON UPDATE CASCADE
         ON DELETE RESTRICT,
 

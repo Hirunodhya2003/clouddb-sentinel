@@ -1,41 +1,19 @@
--- CloudDB Sentinel
--- Module: Product Management
--- Product constraints
--- Idempotent: safe to execute more than once
-
+-- Owner: Member 02
+-- Extra integrity rules and indexes (run after 02_create_products_table.sql)
 USE clouddb_sentinel;
 
-SET @constraint_exists = (
-    SELECT COUNT(*)
-    FROM information_schema.TABLE_CONSTRAINTS
-    WHERE CONSTRAINT_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'products'
-      AND CONSTRAINT_NAME = 'chk_product_name_not_empty'
-);
+-- Prices can never be negative (enforced by MySQL 8.0.16+)
+ALTER TABLE products
+    ADD CONSTRAINT chk_products_base_price CHECK (base_price >= 0);
 
-SET @sql = IF(
-    @constraint_exists = 0,
-    'ALTER TABLE products ADD CONSTRAINT chk_product_name_not_empty CHECK (CHAR_LENGTH(TRIM(product_name)) > 0)',
-    'SELECT ''Product name constraint already exists'''
-);
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+-- Names and codes must not be blank strings
+ALTER TABLE products
+    ADD CONSTRAINT chk_products_name_not_blank CHECK (CHAR_LENGTH(TRIM(product_name)) > 0),
+    ADD CONSTRAINT chk_products_code_not_blank CHECK (CHAR_LENGTH(TRIM(product_code)) > 0);
 
+ALTER TABLE categories
+    ADD CONSTRAINT chk_categories_name_not_blank CHECK (CHAR_LENGTH(TRIM(category_name)) > 0);
 
-SET @constraint_exists = (
-    SELECT COUNT(*)
-    FROM information_schema.TABLE_CONSTRAINTS
-    WHERE CONSTRAINT_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'categories'
-      AND CONSTRAINT_NAME = 'chk_category_name_not_empty'
-);
-
-SET @sql = IF(
-    @constraint_exists = 0,
-    'ALTER TABLE categories ADD CONSTRAINT chk_category_name_not_empty CHECK (CHAR_LENGTH(TRIM(category_name)) > 0)',
-    'SELECT ''Category name constraint already exists'''
-);
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+-- Speeds up filtering the product list by category and status
+CREATE INDEX idx_products_category ON products (category_id);
+CREATE INDEX idx_products_status   ON products (status);

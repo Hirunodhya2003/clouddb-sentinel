@@ -1,33 +1,51 @@
-import { Link, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import "../styles/sentinel-layout.css";
 
 export default function MainLayout() {
   const navigate = useNavigate();
 
-  const logout = () => {
+  function signOut() {
     localStorage.removeItem("token");
     localStorage.removeItem("permissions");
     navigate("/login", { replace: true });
-  };
+  }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <h2>CloudDB Sentinel</h2>
+    <div className="sentinel-shell">
+      <aside className="sentinel-sidebar">
+        <div className="sentinel-brand">
+          <span className="sentinel-brand-mark" aria-hidden="true">CD</span>
+          <strong>CloudDB Sentinel</strong>
+        </div>
 
-        <nav aria-label="Main navigation">
-          <Link to="/dashboard">Dashboard</Link>
-          <Link to="/customers">Customers</Link>
-          <Link to="/integrity-check">Integrity Check</Link>
-          <Link to="/users">Users</Link>
-          <Link to="/roles">Roles &amp; permissions</Link>
+        <nav className="sentinel-nav" aria-label="Main navigation">
+          <div className="sentinel-nav-group">
+            <p>Workspace</p>
+            <NavLink to="/dashboard" end>Dashboard</NavLink>
+            <NavLink to="/customers">Customers</NavLink>
+            <NavLink to="/integrity-check">Integrity Check</NavLink>
+          </div>
+
+          <div className="sentinel-nav-group">
+            <p>Product management</p>
+            <NavLink to="/products">Products</NavLink>
+            <NavLink to="/categories">Categories</NavLink>
+            <NavLink to="/schema-viewer">Schema viewer</NavLink>
+          </div>
+
+          <div className="sentinel-nav-group">
+            <p>Access management</p>
+            <NavLink to="/users">Users</NavLink>
+            <NavLink to="/roles">Roles &amp; permissions</NavLink>
+          </div>
         </nav>
 
-        <button type="button" className="btn-ghost" onClick={logout}>
+        <button className="sentinel-signout" type="button" onClick={signOut}>
           Sign out
         </button>
       </aside>
 
-      <main className="main-content">
+      <main className="sentinel-content">
         <Outlet />
       </main>
     </div>

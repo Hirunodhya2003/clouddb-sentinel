@@ -1,7 +1,5 @@
-# Owner: Member 01
-fastapi
-uvicorn
-sqlalchemy
-pymysql
-python-dotenv
 email-validator
+PyJWT
+argon2-cffi
+pytest
+httpx

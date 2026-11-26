@@ -1,8 +1,293 @@
 {
   "info": {
-    "name": "CloudDB Sentinel",
-    "description": "Owner: Member 06",
+    "name": "CloudDB Sentinel - Member 06",
+    "description": "Customer management and integrity API requests. Run against the local development database.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
-  "item": []
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8000"
+    },
+    {
+      "key": "customer_id",
+      "value": ""
+    },
+    {
+      "key": "customer_email",
+      "value": ""
+    },
+    {
+      "key": "run_id",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "01 Create customer",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const email = 'postman-' + pm.variables.replaceIn('{{$guid}}') + '@example.com';",
+              "pm.collectionVariables.set('customer_email', email);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Customer created', function () {",
+              "  pm.response.to.have.status(201);",
+              "});",
+              "if (pm.response.code === 201) {",
+              "  pm.collectionVariables.set('customer_id', pm.response.json().id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Postman Test Customer\",\n  \"email\": \"{{customer_email}}\",\n  \"phone\": \"0771234567\",\n  \"status\": \"Active\"\n}"
+        },
+        "url": "{{base_url}}/api/v1/customers"
+      }
+    },
+    {
+      "name": "02 List customers",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/api/v1/customers"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Customer list returned', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json()).to.be.an('array');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 Customer details",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/api/v1/customers/{{customer_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Correct customer returned', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(String(pm.response.json().id)).to.eql(String(pm.collectionVariables.get('customer_id')));",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 Update customer",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Updated Postman Customer\",\n  \"email\": \"{{customer_email}}\",\n  \"phone\": \"0711234567\",\n  \"status\": \"Inactive\"\n}"
+        },
+        "url": "{{base_url}}/api/v1/customers/{{customer_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Customer updated', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().name).to.eql('Updated Postman Customer');",
+              "  pm.expect(pm.response.json().status).to.eql('Inactive');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 Search customer",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/api/v1/customers/search?q={{customer_email}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Search finds created customer', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const records = pm.response.json();",
+              "  pm.expect(records).to.have.lengthOf(1);",
+              "  pm.expect(String(records[0].id)).to.eql(String(pm.collectionVariables.get('customer_id')));",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 Customer analytics",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/api/v1/customers/analytics"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Customer counts are consistent', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const data = pm.response.json();",
+              "  pm.expect(data.total_customers).to.eql(data.active_customers + data.inactive_customers);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 Run integrity checks",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"checks\": [\"required_name\", \"unique_email\", \"valid_status\"]\n}"
+        },
+        "url": "{{base_url}}/api/v1/integrity/check"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('All integrity checks pass', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const data = pm.response.json();",
+              "  pm.expect(data.total).to.eql(3);",
+              "  pm.expect(data.passed).to.eql(3);",
+              "  pm.expect(data.failed).to.eql(0);",
+              "  pm.expect(data.errors).to.eql(0);",
+              "});",
+              "if (pm.response.code === 200) {",
+              "  pm.collectionVariables.set('run_id', pm.response.json().run_id);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 Saved integrity results",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/api/v1/integrity/results?run_id={{run_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Three results saved for this run', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const records = pm.response.json();",
+              "  pm.expect(records).to.have.lengthOf(3);",
+              "  records.forEach(function (record) {",
+              "    pm.expect(record.run_id).to.eql(pm.collectionVariables.get('run_id'));",
+              "    pm.expect(record.status).to.eql('PASS');",
+              "  });",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 Delete test customer",
+      "request": {
+        "method": "DELETE",
+        "url": "{{base_url}}/api/v1/customers/{{customer_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Test customer deleted', function () {",
+              "  pm.response.to.have.status(204);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 Verify deletion",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/api/v1/customers/{{customer_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Deleted customer returns 404', function () {",
+              "  pm.response.to.have.status(404);",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
 }
