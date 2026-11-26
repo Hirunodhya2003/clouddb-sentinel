@@ -1,2 +1,24 @@
 # Owner: Member 09
-# TODO: fill in
+# Prometheus alerting rules for CloudDB Sentinel API, MySQL, and host health
+
+groups:
+  - name: clouddb_sentinel_alerts
+    interval: 15s
+    rules:
+      - alert: CloudDBBackendDown
+        expr: up{job="clouddb-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "CloudDB Sentinel FastAPI backend is unreachable"
+          description: "Prometheus could not scrape /metrics from clouddb-backend for over 1 minute."
+
+      - alert: MySQLExporterDown
+        expr: up{job="mysqld-exporter"} == 0 or mysql_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MySQL server or mysqld_exporter is down"
+          description: "MySQL telemetry indicates database connectivity failure."
