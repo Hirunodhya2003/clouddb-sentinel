@@ -1,2 +1,6 @@
--- Owner: Member 06
--- TODO: write SQL
+-- CloudDB Sentinel
+-- Seed: Product data
+--
+-- No product records are inserted here.
+-- Actual product information must be obtained
+-- from S.P. Apparel before inserting records.

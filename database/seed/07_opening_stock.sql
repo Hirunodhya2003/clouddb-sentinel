@@ -1,2 +1,9 @@
--- Owner: Member 06
--- TODO: write SQL
+-- CloudDB Sentinel
+-- Seed: Opening inventory data
+--
+-- No opening stock records are inserted here.
+-- Actual stock quantities must be verified
+-- with S.P. Apparel before recording opening balances.
+--
+-- Opening stock must be recorded through
+-- the inventory initialization process.

@@ -1,113 +1,92 @@
-// Owner: Member 02
-// TODO: wrap <AppRoutes /> with BrowserRouter + AuthContext provider
-import { useState } from "react";
-import "./App.css";
-import CustomerList from "./pages/customers/CustomerList";
+import { Navigate, Route, Routes } from "react-router-dom";
 
-const menuGroups = [
-  {
-    title: "Workspace",
-    items: [
-      "Dashboard",
-      "Products",
-      "Inventory",
-      "Procurement",
-      "Sales",
-      "Customers",
-      "Reports",
-    ],
-  },
-  {
-    title: "Database & Security",
-    items: ["Database Tools", "Performance", "Audit & Recovery"],
-  },
-  {
-    title: "Administration",
-    items: ["Users & Roles", "Settings"],
-  },
-];
+import "./App.css";
+
+import AppLayout from "./layouts/MainLayout";
+import LoginPage from "./pages/auth/Login";
+import ProtectedRoute from "./pages/auth/ProtectedRoute";
+import CategoryList from "./pages/categories/CategoryList";
+import CreateCategory from "./pages/categories/CreateCategory";
+import EditCategory from "./pages/categories/EditCategory";
+import CustomerDetails from "./pages/customers/CustomerDetails";
+import CustomerList from "./pages/customers/CustomerList";
+import CreateCustomer from "./pages/customers/CreateCustomer";
+import EditCustomer from "./pages/customers/EditCustomer";
+import Dashboard from "./pages/dashboard/Dashboard";
+import IntegrityCheck from "./pages/integrity-check/IntegrityCheck";
+import CreateProduct from "./pages/products/CreateProduct";
+import EditProduct from "./pages/products/EditProduct";
+import ProductDetails from "./pages/products/ProductDetails";
+import ProductList from "./pages/products/ProductList";
+import RolesPage from "./pages/roles/RolesPage";
+import SchemaViewer from "./pages/schema-viewer/SchemaViewer";
+import UserFormPage from "./pages/users/UserFormpage";
+import UserListPage from "./pages/users/UserList";
+import UserProfilePage from "./pages/users/UserProfilePage";
+import SignUp from "./pages/auth/SignUp";
+<Route path="/signup" element={<SignUp />} />;
+
+function ForbiddenPage() {
+  return (
+    <main>
+      <h1>403 - Forbidden</h1>
+    </main>
+  );
+}
+
+function guard(permission, element) {
+  return <ProtectedRoute permission={permission}>{element}</ProtectedRoute>;
+}
 
 export default function App() {
-  const [menuSearch, setMenuSearch] = useState("");
-
   return (
-    <div className="app-layout">
-      <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-logo">SP</span>
-          <div>
-            <strong>S.P. APPARELS</strong>
-            <span className="brand-subtitle">CLOUDDB SENTINEL</span>
-          </div>
-        </div>
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/403" element={<ForbiddenPage />} />
 
-        <div className="workspace-card">
-          <span className="workspace-logo">S</span>
-          <div>
-            <strong>S.P. Apparels</strong>
-            <small>Enterprise workspace</small>
-          </div>
-        </div>
+      <Route
+        element={
+          <ProtectedRoute>
+            <AppLayout />
+          </ProtectedRoute>
+        }
+      >
+        <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<Dashboard />} />
 
-        <input
-          className="menu-search"
-          aria-label="Search menu"
-          placeholder="Search menu..."
-          value={menuSearch}
-          onChange={(event) => setMenuSearch(event.target.value)}
+        {/* Member 02: products, categories, schema viewer */}
+        <Route path="/products" element={<ProductList />} />
+        <Route path="/products/new" element={<CreateProduct />} />
+        <Route path="/products/:id/edit" element={<EditProduct />} />
+        <Route path="/products/:id" element={<ProductDetails />} />
+        <Route path="/categories" element={<CategoryList />} />
+        <Route path="/categories/new" element={<CreateCategory />} />
+        <Route path="/categories/:id/edit" element={<EditCategory />} />
+        <Route path="/schema-viewer" element={<SchemaViewer />} />
+
+        <Route path="/customers" element={<CustomerList />} />
+        <Route path="/customers/new" element={<CreateCustomer />} />
+        <Route path="/customers/:id/edit" element={<EditCustomer />} />
+        <Route path="/customers/:id" element={<CustomerDetails />} />
+        <Route path="/integrity-check" element={<IntegrityCheck />} />
+
+        <Route path="/users" element={guard("user:read", <UserListPage />)} />
+        <Route
+          path="/users/new"
+          element={guard("user:create", <UserFormPage />)}
         />
+        <Route
+          path="/users/:id"
+          element={guard("user:read", <UserProfilePage />)}
+        />
+        <Route
+          path="/users/:id/edit"
+          element={guard("user:update", <UserFormPage />)}
+        />
+        <Route path="/roles" element={guard("role:read", <RolesPage />)} />
+      </Route>
 
-        <nav className="navigation" aria-label="Main navigation">
-          {menuGroups.map((group) => {
-            const items = group.items.filter((item) =>
-              item.toLowerCase().includes(menuSearch.toLowerCase()),
-            );
-
-            if (items.length === 0) return null;
-
-            return (
-              <div className="menu-group" key={group.title}>
-                <p className="menu-heading">{group.title}</p>
-
-                {items.map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    className={`menu-item ${item === "Customers" ? "active" : ""}`}
-                    aria-current={item === "Customers" ? "page" : undefined}
-                    disabled={item !== "Customers"}
-                  >
-                    {item}
-                  </button>
-                ))}
-              </div>
-            );
-          })}
-        </nav>
-
-        <div className="sidebar-profile">
-          <span className="avatar">SA</span>
-          <div>
-            <strong>System Admin</strong>
-            <small>Administrator</small>
-          </div>
-        </div>
-      </aside>
-
-      <div className="main-layout">
-        <header className="topbar">
-          <p>
-            S.P. Apparels <span>/</span> Customer management
-          </p>
-          <span className="avatar avatar-light" aria-label="System Admin">
-            SA
-          </span>
-        </header>
-
-        <main className="page-content">
-          <CustomerList />
-        </main>
-      </div>
-    </div>
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+    </Routes>
   );
 }
