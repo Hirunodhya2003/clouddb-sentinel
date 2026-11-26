@@ -1,5 +1,11 @@
 // Owner: Member 09
-// TODO: implement
-export default function PlanComparison() {
-  return null;
+// Initial PlanComparison structure before interactive refinements.
+
+export default function PlanComparison(props = {}) {
+  const title = props.title || "PlanComparison";
+  return (
+    <section className="card" aria-label={title}>
+      <h3>{title}</h3>
+    </section>
+  );
 }
