@@ -1,0 +1,20 @@
+# Owner: Member 02
+# Business-rule errors raised by services. Endpoints turn them into HTTP responses.
+class ServiceError(Exception):
+    status_code = 400
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
+class NotFoundError(ServiceError):
+    status_code = 404
+
+
+class ConflictError(ServiceError):
+    status_code = 409
+
+
+class BadRequestError(ServiceError):
+    status_code = 400

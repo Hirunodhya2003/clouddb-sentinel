@@ -1,1 +1,5 @@
-# Owner: Member 01
+email-validator
+PyJWT
+argon2-cffi
+pytest
+httpx
