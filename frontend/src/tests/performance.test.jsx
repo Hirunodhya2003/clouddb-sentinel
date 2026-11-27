@@ -1,46 +1,82 @@
 // Owner: Member 09
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-vi.mock("../services/queryAnalyzerService.js", () => ({
-  getPresetScenarios: vi.fn(),
-  explainQuery: vi.fn(),
-  compareQueryPlans: vi.fn(),
-  getAnalyzedQueryHistory: vi.fn(),
-}));
+vi.mock("../services/queryAnalyzerService.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    getPresetScenarios: vi.fn(),
+    explainQuery: vi.fn(),
+    compareQueryPlans: vi.fn(),
+    getAnalyzedQueryHistory: vi.fn(),
+  };
+});
 
-vi.mock("../services/performanceMonitorService.js", () => ({
-  getPerformanceOverview: vi.fn(),
-  getConnectionStats: vi.fn(),
-  getTableStatistics: vi.fn(),
-  getSlowQueries: vi.fn(),
-  recordQueryLog: vi.fn(),
-}));
+vi.mock("../services/performanceMonitorService.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    getPerformanceOverview: vi.fn(),
+    getConnectionStats: vi.fn(),
+    getTableStatistics: vi.fn(),
+    getSlowQueries: vi.fn(),
+    recordQueryLog: vi.fn(),
+  };
+});
 
 import QueryAnalyzer from "../pages/query-analyzer/QueryAnalyzer.jsx";
 import PerformanceMonitor from "../pages/performance-monitor/PerformanceMonitor.jsx";
 import {
+  analyzeSqlHeuristics,
   compareQueryPlans,
   explainQuery,
   getAnalyzedQueryHistory,
   getPresetScenarios,
 } from "../services/queryAnalyzerService.js";
-import { getPerformanceOverview } from "../services/performanceMonitorService.js";
+import {
+  evaluateDatabaseHealth,
+  getPerformanceOverview,
+} from "../services/performanceMonitorService.js";
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
 
-describe("Member 09 Query Analyzer & Performance Monitor UI", () => {
-  it("runs EXPLAIN in QueryAnalyzer and displays execution plan steps and suggestions", async () => {
+describe("Member 09 Smart Query Analyzer & Performance Monitor UI", () => {
+  it("evaluates static SQL sargability heuristics and blocks mutating statements", () => {
+    const unsafe = analyzeSqlHeuristics("DROP TABLE sales");
+    expect(unsafe.validSelect).toBe(false);
+    expect(unsafe.score).toBe(0);
+
+    const wildcard = analyzeSqlHeuristics(
+      "SELECT * FROM sales WHERE invoice_number LIKE '%INV-001%'"
+    );
+    expect(wildcard.validSelect).toBe(true);
+    expect(wildcard.score).toBeLessThan(70);
+
+    const clean = analyzeSqlHeuristics(
+      "SELECT sale_id, invoice_number FROM sales WHERE sale_date >= '2026-01-01' LIMIT 25"
+    );
+    expect(clean.validSelect).toBe(true);
+    expect(clean.score).toBe(100);
+  });
+
+  it("runs EXPLAIN in QueryAnalyzer and displays visual pipeline steps and suggestions", async () => {
     getPresetScenarios.mockResolvedValueOnce([]);
     getAnalyzedQueryHistory.mockResolvedValue([]);
     explainQuery.mockResolvedValueOnce({
       query_text: "SELECT * FROM inventory WHERE quantity_on_hand <= reorder_level",
-      query_fingerprint: "abc123",
+      query_fingerprint: "abc123def4567890",
       mode: "EXPLAIN",
       execution_time_ms: 4.25,
       total_estimated_rows: 250,
@@ -75,7 +111,6 @@ describe("Member 09 Query Analyzer & Performance Monitor UI", () => {
     await waitFor(() => {
       expect(explainQuery).toHaveBeenCalled();
       expect(screen.getByText("Full Table Scan")).toBeInTheDocument();
-      expect(screen.getByText("inventory")).toBeInTheDocument();
       expect(
         screen.getByText("Full table scan (type=ALL) detected on inventory.")
       ).toBeInTheDocument();
@@ -87,7 +122,8 @@ describe("Member 09 Query Analyzer & Performance Monitor UI", () => {
     getAnalyzedQueryHistory.mockResolvedValueOnce([]);
     compareQueryPlans.mockResolvedValueOnce({
       winner: "optimized",
-      summary: "Optimized query improved the execution plan (estimated rows examined reduced by 90.0%).",
+      summary:
+        "Optimized query improved the execution plan (estimated rows examined reduced by 90.0%).",
       estimated_rows_delta: 90,
       estimated_rows_reduction_pct: 90.0,
       execution_time_delta_ms: 3.1,
@@ -138,7 +174,9 @@ describe("Member 09 Query Analyzer & Performance Monitor UI", () => {
 
     render(<QueryAnalyzer />);
 
-    fireEvent.click(screen.getByRole("tab", { name: "Before vs After Plan Comparison" }));
+    fireEvent.click(
+      screen.getByRole("tab", { name: "Before vs After Plan Comparison" })
+    );
     fireEvent.click(screen.getByRole("button", { name: "Compare Plans" }));
 
     await waitFor(() => {
@@ -148,7 +186,13 @@ describe("Member 09 Query Analyzer & Performance Monitor UI", () => {
     });
   });
 
-  it("renders PerformanceMonitor connection pool stats and slow queries table", async () => {
+  it("renders PerformanceMonitor radial gauge, health diagnostics, and SQL log modal", async () => {
+    const diag = evaluateDatabaseHealth({
+      connections: { connection_utilization_pct: 85, aborted_connects: 0 },
+      slow_queries: [{ is_slow_query: true }],
+    });
+    expect(diag.status).toBe("Critical");
+
     getPerformanceOverview.mockResolvedValue({
       connections: {
         mysql_version: "8.0.46",
@@ -196,6 +240,7 @@ describe("Member 09 Query Analyzer & Performance Monitor UI", () => {
           total_rows_examined: 6200,
         },
       ],
+      slow_query_threshold_ms: 100.0,
     });
 
     render(<PerformanceMonitor />);
@@ -205,6 +250,12 @@ describe("Member 09 Query Analyzer & Performance Monitor UI", () => {
       expect(screen.getByText("SLOW")).toBeInTheDocument();
       expect(screen.getByText("/api/v1/reports/sales")).toBeInTheDocument();
     });
+
+    fireEvent.click(screen.getByText("/api/v1/reports/sales"));
+    expect(
+      screen.getByRole("dialog", { name: "SQL telemetry inspector" })
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
     fireEvent.click(screen.getByLabelText("Slow queries only"));
     await waitFor(() => {

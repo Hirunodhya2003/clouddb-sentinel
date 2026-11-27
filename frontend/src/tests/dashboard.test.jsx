@@ -1,29 +1,49 @@
 // Owner: Member 09
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { MemoryRouter } from "react-router-dom";
 
-vi.mock("../services/dashboardService.js", () => ({
-  getDashboardOverview: vi.fn(),
-  getSalesChart: vi.fn(),
-  getSummaryCards: vi.fn(),
-  getInventoryChart: vi.fn(),
-  getRecentTransactions: vi.fn(),
-}));
+vi.mock("../services/dashboardService.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    getDashboardOverview: vi.fn(),
+    getSalesChart: vi.fn(),
+    getSummaryCards: vi.fn(),
+    getInventoryChart: vi.fn(),
+    getRecentTransactions: vi.fn(),
+  };
+});
 
-vi.mock("../services/reportService.js", () => ({
-  getSalesReport: vi.fn(),
-  getPurchaseReport: vi.fn(),
-  getInventoryReport: vi.fn(),
-  getBusinessSummary: vi.fn(),
-}));
+vi.mock("../services/reportService.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    getSalesReport: vi.fn(),
+    getPurchaseReport: vi.fn(),
+    getInventoryReport: vi.fn(),
+    getBusinessSummary: vi.fn(),
+  };
+});
 
 import Dashboard from "../pages/dashboard/Dashboard.jsx";
 import SummaryCards from "../components/dashboard/SummaryCards.jsx";
+import SalesChart from "../components/dashboard/SalesChart.jsx";
+import InventoryChart from "../components/dashboard/InventoryChart.jsx";
+import RecentTransactions from "../components/dashboard/RecentTransactions.jsx";
 import ReportTable from "../components/reports/ReportTable.jsx";
-import { getDashboardOverview } from "../services/dashboardService.js";
+import {
+  computeBusinessHealthScore,
+  getDashboardOverview,
+} from "../services/dashboardService.js";
 import { getSalesReport } from "../services/reportService.js";
 
 afterEach(() => {
@@ -31,10 +51,12 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("Member 09 Dashboard & Reports UI", () => {
-  it("renders SummaryCards with formatted KPI values and alert badges", () => {
+describe("Member 09 Smart Dashboard & Business Reports UI", () => {
+  it("renders SummaryCards with sparklines, KPI values, and alert badges", () => {
+    const onSelect = vi.fn();
     render(
       <SummaryCards
+        onSelectCard={onSelect}
         cards={[
           {
             key: "gross_revenue",
@@ -45,7 +67,7 @@ describe("Member 09 Dashboard & Reports UI", () => {
             badge: "Sales",
           },
           {
-            key: "low_stock",
+            key: "low_stock_alerts",
             label: "Low / Out-of-Stock Variants",
             formatted_value: "3",
             subtitle: "3 SKU(s) at or below reorder level",
@@ -59,9 +81,100 @@ describe("Member 09 Dashboard & Reports UI", () => {
     expect(screen.getByText("Completed Sales Revenue")).toBeInTheDocument();
     expect(screen.getByText("LKR 125,000.00")).toBeInTheDocument();
     expect(screen.getByText("Action Needed")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Completed Sales Revenue"));
+    expect(onSelect).toHaveBeenCalledTimes(1);
   });
 
-  it("loads live Dashboard overview and switches to Business Reports tab", async () => {
+  it("toggles SalesChart between Bars and Area modes and switches InventoryChart to Donut Ring", () => {
+    render(
+      <div>
+        <SalesChart
+          data={[
+            { period: "2026-11-20", label: "11-20", orders_count: 3, revenue: 30000, discounts: 0 },
+            { period: "2026-11-21", label: "11-21", orders_count: 5, revenue: 54000, discounts: 1000 },
+          ]}
+        />
+        <InventoryChart
+          data={[
+            {
+              category_id: 1,
+              category_name: "Formal Shirts",
+              units_on_hand: 90,
+              variant_count: 10,
+              retail_value: 250000,
+              cost_value: 140000,
+              low_stock_count: 1,
+            },
+          ]}
+        />
+      </div>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Orders" }));
+    expect(screen.getByText(/Peak: 11-21/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Donut Ring" }));
+    expect(
+      screen.getByRole("img", { name: "Category retail valuation donut ring" })
+    ).toBeInTheDocument();
+  });
+
+  it("filters RecentTransactions and opens the Transaction Detail Modal", () => {
+    render(
+      <RecentTransactions
+        items={[
+          {
+            transaction_type: "SALE",
+            record_id: 10,
+            reference_number: "INV-7001",
+            counterparty: "Nimal Perera",
+            amount: 14500,
+            status: "COMPLETED",
+            occurred_at: "2026-11-25T10:00:00Z",
+          },
+          {
+            transaction_type: "PURCHASE",
+            record_id: 22,
+            reference_number: "PO-8002",
+            counterparty: "Ceylon Fabrics",
+            amount: 62000,
+            status: "RECEIVED",
+            occurred_at: "2026-11-24T09:00:00Z",
+          },
+        ]}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Search recent transactions"), {
+      target: { value: "INV-7001" },
+    });
+    expect(screen.getByText("INV-7001")).toBeInTheDocument();
+    expect(screen.queryByText("PO-8002")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Inspect" }));
+    expect(
+      screen.getByRole("dialog", { name: "Transaction details" })
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  });
+
+  it("loads live Dashboard overview, computes health score, and switches to Business Reports tab", async () => {
+    const score = computeBusinessHealthScore({
+      summary_cards: [
+        { key: "gross_revenue", value: 90000 },
+        { key: "purchase_spend", value: 45000 },
+        { key: "inventory_valuation", value: 220000 },
+        { key: "low_stock_alerts", value: 0 },
+      ],
+      sales_chart: [{ period: "2026-11-20", revenue: 90000, orders_count: 6 }],
+      inventory_chart: [
+        { category_name: "Menswear", retail_value: 220000, units_on_hand: 60 },
+      ],
+    });
+    expect(score.score).toBeGreaterThanOrEqual(85);
+
     getDashboardOverview.mockResolvedValueOnce({
       summary_cards: [
         {
@@ -75,8 +188,20 @@ describe("Member 09 Dashboard & Reports UI", () => {
         },
       ],
       sales_chart: [
-        { period: "2026-11-20", label: "11-20", orders_count: 2, revenue: 25000, discounts: 0 },
-        { period: "2026-11-21", label: "11-21", orders_count: 2, revenue: 20000, discounts: 500 },
+        {
+          period: "2026-11-20",
+          label: "11-20",
+          orders_count: 2,
+          revenue: 25000,
+          discounts: 0,
+        },
+        {
+          period: "2026-11-21",
+          label: "11-21",
+          orders_count: 2,
+          revenue: 20000,
+          discounts: 500,
+        },
       ],
       inventory_chart: [
         {
@@ -141,23 +266,34 @@ describe("Member 09 Dashboard & Reports UI", () => {
 
     await waitFor(() => {
       expect(getSalesReport).toHaveBeenCalled();
-      expect(screen.getByText("Interactive Business Reports")).toBeInTheDocument();
+      expect(
+        screen.getByText("Interactive Business Reports")
+      ).toBeInTheDocument();
     });
   });
 
-  it("renders ReportTable rows and summary items", () => {
+  it("sorts ReportTable columns and inspects a clicked row", () => {
     render(
       <ReportTable
         columns={[
           { key: "sku", header: "SKU", mono: true },
           { key: "quantity_on_hand", header: "On Hand" },
         ]}
-        rows={[{ inventory_id: 1, sku: "OXF-M-BLU", quantity_on_hand: 14 }]}
-        summaryItems={[{ label: "Tracked Variants", value: 1 }]}
+        rows={[
+          { inventory_id: 1, sku: "OXF-M-BLU", quantity_on_hand: 14 },
+          { inventory_id: 2, sku: "DEN-S-BLK", quantity_on_hand: 3 },
+        ]}
+        summaryItems={[{ label: "Tracked Variants", value: 2 }]}
       />
     );
 
+    fireEvent.click(screen.getByText("On Hand"));
     expect(screen.getByText("OXF-M-BLU")).toBeInTheDocument();
     expect(screen.getByText("Tracked Variants")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("OXF-M-BLU"));
+    expect(
+      screen.getByRole("dialog", { name: "Report row details" })
+    ).toBeInTheDocument();
   });
 });
