@@ -1,2 +1,16 @@
 # Owner: Member 09
-# TODO: fill in
+# Grafana dashboard provider provisioning
+
+apiVersion: 1
+
+providers:
+  - name: CloudDB Sentinel Dashboards
+    orgId: 1
+    folder: CloudDB Sentinel
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
