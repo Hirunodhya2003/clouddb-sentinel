@@ -2,11 +2,7 @@
   "uid": "clouddb-infrastructure",
   "title": "CloudDB Sentinel - Host & Container Infrastructure",
   "description": "Owner: Member 09 - CPU, memory, filesystem, and network telemetry via node_exporter",
-  "tags": [
-    "clouddb-sentinel",
-    "infrastructure",
-    "member-09"
-  ],
+  "tags": ["clouddb-sentinel", "infrastructure", "member-09"],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -16,16 +12,8 @@
       "id": 1,
       "type": "timeseries",
       "title": "CPU Busy (%)",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
           "expr": "100 - (avg by (instance) (irate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
@@ -38,22 +26,39 @@
       "id": 2,
       "type": "timeseries",
       "title": "Memory Utilization (%)",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
           "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Filesystem Free Space (%)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "(node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay\"} / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay\"}) * 100",
+          "legendFormat": "{{mountpoint}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Network Receive / Transmit (bytes/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "rate(node_network_receive_bytes_total{device!=\"lo\"}[1m])", "legendFormat": "RX {{device}}", "refId": "A" },
+        { "expr": "rate(node_network_transmit_bytes_total{device!=\"lo\"}[1m])", "legendFormat": "TX {{device}}", "refId": "B" }
       ]
     }
   ]
