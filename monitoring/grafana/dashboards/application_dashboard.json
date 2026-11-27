@@ -1,6 +1,79 @@
 {
-  "title": "application_dashboard",
-  "description": "Owner: Member 09",
-  "panels": [],
-  "schemaVersion": 39
+  "uid": "clouddb-application",
+  "title": "CloudDB Sentinel - Application API Performance",
+  "description": "Owner: Member 09 - FastAPI request rate, latency, active requests, and slow SQL telemetry",
+  "tags": [
+    "clouddb-sentinel",
+    "fastapi",
+    "member-09"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Process Uptime (s)",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "clouddb_process_uptime_seconds",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "In-Flight HTTP Requests",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "clouddb_http_active_requests",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Instrumented DB Queries",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(clouddb_db_queries_total)",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
 }
