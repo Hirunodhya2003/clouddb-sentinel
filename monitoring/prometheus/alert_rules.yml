@@ -22,3 +22,30 @@ groups:
         annotations:
           summary: "MySQL server or mysqld_exporter is down"
           description: "MySQL telemetry indicates database connectivity failure."
+
+      - alert: MySQLHighConnectionUtilization
+        expr: (mysql_global_status_threads_connected / mysql_global_variables_max_connections) * 100 > 80
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MySQL connection pool utilization above 80%"
+          description: "Active MySQL connections are approaching max_connections."
+
+      - alert: CloudDBSlowQueriesSpike
+        expr: increase(clouddb_db_slow_queries_total[5m]) > 10
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated slow database queries detected"
+          description: "More than 10 slow application SQL queries were logged in the past 5 minutes."
+
+      - alert: CloudDBHighHttp5xxRate
+        expr: sum(rate(clouddb_http_requests_total{status=~"5.."}[5m])) > 0.5
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Elevated HTTP 5xx error rate on CloudDB Sentinel API"
+          description: "Backend 5xx responses exceed 0.5 requests/sec over a 5-minute window."
