@@ -2,11 +2,7 @@
   "uid": "clouddb-application",
   "title": "CloudDB Sentinel - Application API Performance",
   "description": "Owner: Member 09 - FastAPI request rate, latency, active requests, and slow SQL telemetry",
-  "tags": [
-    "clouddb-sentinel",
-    "fastapi",
-    "member-09"
-  ],
+  "tags": ["clouddb-sentinel", "fastapi", "member-09"],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -16,61 +12,58 @@
       "id": 1,
       "type": "stat",
       "title": "Process Uptime (s)",
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 0,
-        "y": 0
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "targets": [
-        {
-          "expr": "clouddb_process_uptime_seconds",
-          "refId": "A"
-        }
-      ]
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "clouddb_process_uptime_seconds", "refId": "A" }]
     },
     {
       "id": 2,
       "type": "stat",
       "title": "In-Flight HTTP Requests",
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 6,
-        "y": 0
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "targets": [
-        {
-          "expr": "clouddb_http_active_requests",
-          "refId": "A"
-        }
-      ]
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "clouddb_http_active_requests", "refId": "A" }]
     },
     {
       "id": 3,
       "type": "stat",
       "title": "Instrumented DB Queries",
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 12,
-        "y": 0
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum(clouddb_db_queries_total)", "refId": "A" }]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Slow DB Queries",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum(clouddb_db_slow_queries_total)", "refId": "A" }]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "HTTP Requests / sec by Route",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "sum(clouddb_db_queries_total)",
+          "expr": "sum by (method, path) (rate(clouddb_http_requests_total[1m]))",
+          "legendFormat": "{{method}} {{path}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "P95 HTTP Request Latency (ms)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, path) (rate(clouddb_http_request_duration_ms_bucket[5m])))",
+          "legendFormat": "{{path}}",
           "refId": "A"
         }
       ]
